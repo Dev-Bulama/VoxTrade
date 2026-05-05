@@ -4,8 +4,6 @@
 @section('content')
 
 @php
-    use App\Services\AITradeService;
-
     $isBuy     = strtolower($signal->type) === 'buy';
     $entry     = (float) $signal->entry_price;
     $sl        = (float) $signal->stop_loss;
@@ -13,7 +11,7 @@
     $potential = $entry > 0 ? round(abs($tp - $entry) / $entry * 100, 2) : 0;
     $risk      = $entry > 0 ? round(abs($sl - $entry) / $entry * 100, 2) : 0;
     $rr        = $risk > 0  ? round($potential / $risk, 2) : 0;
-    $durMins   = AITradeService::parseDurationMinutes($signal->duration ?? '');
+    $durMins   = \App\Services\AITradeService::parseDurationMinutes($signal->duration ?? '');
     $expiresTs = $signal->created_at->addMinutes($durMins)->timestamp;
     $decimals  = str_contains($signal->pair, 'JPY') ? 3 : (str_contains($signal->pair, 'USDT') || str_contains($signal->pair, 'XAU') ? 2 : 5);
     $timeframe = match(true) {

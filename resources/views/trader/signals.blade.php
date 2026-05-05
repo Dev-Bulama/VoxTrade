@@ -83,8 +83,6 @@
 
 @forelse($signals as $signal)
 @php
-    use App\Services\AITradeService;
-
     $isActive  = $signal->status === 'active';
     $isBuy     = strtoupper($signal->type) === 'BUY';
     $entry     = (float) $signal->entry_price;
@@ -112,7 +110,7 @@
     $cardBorder = $isActive ? ($isBuy ? 'border-green-500/25' : 'border-red-500/25') : 'border-white/5';
 
     // Duration + timeframe
-    $durMins   = AITradeService::parseDurationMinutes($signal->duration ?? '');
+    $durMins   = \App\Services\AITradeService::parseDurationMinutes($signal->duration ?? '');
     $expiresTs = $signal->created_at->addMinutes($durMins)->timestamp;
     $timeframe = match(true) {
         $durMins <= 30   => ['label' => 'SCALP',    'cls' => 'bg-purple-500/15 text-purple-400 border-purple-500/30'],
