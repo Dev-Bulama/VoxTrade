@@ -3,39 +3,66 @@
 namespace App\Services;
 
 use App\Models\ApiKey;
-use App\Models\Trade;
 use App\Models\Setting;
+use App\Models\Trade;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AITradeService
 {
     /**
-     * Fetch market data from Binance for crypto pairs.
+     * Map trading symbols to CoinGecko coin IDs.
      */
-    public function fetchBinanceData(string $symbol): ?array
+    private array $coinGeckoMap = [
+        'BTCUSDT' => 'bitcoin',
+        'ETHUSDT' => 'ethereum',
+        'BNBUSDT' => 'binancecoin',
+        'SOLUSDT' => 'solana',
+        'XRPUSDT' => 'ripple',
+        'ADAUSDT' => 'cardano',
+    ];
+
+    /**
+     * Fetch crypto OHLC data from CoinGecko (no API key required).
+     * Returns hourly close prices for the last 2 days.
+     */
+    public function fetchCryptoData(string $symbol): ?array
     {
+        $coinId = $this->coinGeckoMap[strtoupper($symbol)] ?? null;
+
+        if (!$coinId) {
+            Log::warning("No CoinGecko mapping for symbol {$symbol}");
+            return null;
+        }
+
         try {
-            $response = Http::get('https://api.binance.com/api/v3/klines', [
-                'symbol'   => $symbol,
-                'interval' => '1h',
-                'limit'    => 50,
-            ]);
+            $response = Http::withHeaders(['Accept' => 'application/json'])
+                ->timeout(15)
+                ->get("https://api.coingecko.com/api/v3/coins/{$coinId}/market_chart", [
+                    'vs_currency' => 'usd',
+                    'days'        => '2',
+                    'interval'    => 'hourly',
+                ]);
 
             if (!$response->successful()) {
-                Log::warning("Binance API request failed for {$symbol}", ['status' => $response->status()]);
+                Log::warning("CoinGecko request failed for {$symbol}", [
+                    'status' => $response->status(),
+                    'body'   => $response->body(),
+                ]);
                 return null;
             }
 
-            $klines = $response->json();
+            $data        = $response->json();
+            $pricePoints = $data['prices'] ?? [];
+            $volPoints   = $data['total_volumes'] ?? [];
 
-            if (empty($klines)) {
+            if (empty($pricePoints)) {
                 return null;
             }
 
-            $prices = array_map(fn($k) => (float) $k[4], $klines); // close prices
-            $volume = (float) end($klines)[5];
+            $prices       = array_map(fn($p) => (float) $p[1], $pricePoints);
             $currentPrice = end($prices);
+            $volume       = !empty($volPoints) ? (float) end($volPoints)[1] : null;
 
             return [
                 'symbol'        => $symbol,
@@ -44,7 +71,7 @@ class AITradeService
                 'volume'        => $volume,
             ];
         } catch (\Throwable $e) {
-            Log::error("Exception fetching Binance data for {$symbol}: " . $e->getMessage());
+            Log::error("Exception fetching CoinGecko data for {$symbol}: " . $e->getMessage());
             return null;
         }
     }
@@ -198,11 +225,13 @@ class AITradeService
     }
 
     /**
-     * Build a prompt for OpenAI market analysis.
+     * Build a prompt for OpenAI market analysis, including past trade outcomes
+     * so the model can calibrate its future prediction accuracy.
      */
     public function buildAnalysisPrompt(array $marketData): string
     {
         $symbol       = $marketData['symbol'] ?? 'UNKNOWN';
+        $displayPair  = $marketData['display_pair'] ?? $symbol;
         $currentPrice = $marketData['current_price'] ?? 0;
         $rsi          = $marketData['rsi'] ?? 50;
         $ema9         = $marketData['ema9'] ?? $currentPrice;
@@ -211,31 +240,67 @@ class AITradeService
         $volume       = $marketData['volume'] ?? 'N/A';
         $category     = $marketData['category'] ?? 'crypto';
 
+        // Pull recent closed trades for this pair to inform the prediction
+        $pastTrades = Trade::where('pair', $displayPair)
+            ->whereIn('status', ['tp_hit', 'sl_hit'])
+            ->latest()
+            ->take(10)
+            ->get(['type', 'confidence', 'status', 'created_at']);
+
+        $pastContext = '';
+        if ($pastTrades->isNotEmpty()) {
+            $wins    = $pastTrades->where('status', 'tp_hit')->count();
+            $losses  = $pastTrades->where('status', 'sl_hit')->count();
+            $total   = $pastTrades->count();
+            $winRate = round($wins / $total * 100);
+            $avgConf = round($pastTrades->avg('confidence'));
+
+            $history = $pastTrades->map(fn($t) =>
+                "{$t->type} → " . ($t->status === 'tp_hit' ? 'WIN' : 'LOSS') . " (conf: {$t->confidence}%)"
+            )->implode(', ');
+
+            $pastContext = <<<PAST
+
+Past performance for {$displayPair} (last {$total} closed trades):
+- Win rate: {$winRate}% ({$wins}W / {$losses}L)
+- Average confidence on past signals: {$avgConf}%
+- Recent outcomes: {$history}
+
+Use this history to calibrate your confidence. Only issue signals you believe have ≥75% probability of hitting take profit before stop loss. If current conditions are ambiguous, set confidence lower than 70.
+PAST;
+        }
+
         return <<<PROMPT
-You are an expert financial analyst specializing in {$category} trading signals.
+You are an elite quantitative trading analyst. Your job is to generate a FORWARD-LOOKING trade signal for {$displayPair} — predict where price is headed next, not just what happened.
 
-Analyze the following market data for {$symbol} and generate a trading signal.
-
-Market Data:
-- Symbol: {$symbol}
+Current Market Data ({$category}):
+- Pair: {$displayPair}
 - Current Price: {$currentPrice}
-- RSI (14): {$rsi}
+- RSI (14-period): {$rsi}
 - EMA 9: {$ema9}
 - EMA 21: {$ema21}
-- Trend: {$trend}
+- Trend Direction: {$trend}
 - Volume: {$volume}
+{$pastContext}
 
-Based on this data, provide a trading signal. Respond ONLY with a valid JSON object in this exact format:
+Rules:
+1. Only generate a signal if you are confident price will move in the predicted direction.
+2. Set stop loss at a key technical level, not arbitrary percentage.
+3. Take profit must offer at least 1.5× the risk (risk:reward ≥ 1:1.5).
+4. Confidence must reflect the true probability (aim for 75–90% only when conditions are clear).
+5. Duration should reflect how long to hold the position realistically.
+
+Respond ONLY with a valid JSON object — no markdown, no extra text:
 {
-  "pair": "{$symbol}",
+  "pair": "{$displayPair}",
   "type": "BUY or SELL",
   "entry": <entry price as number>,
   "stop_loss": <stop loss price as number>,
   "take_profit": <take profit price as number>,
-  "confidence": <confidence score 0-100 as integer>,
-  "duration": "<suggested trade duration e.g. 4h, 1d>",
+  "confidence": <integer 0-100>,
+  "duration": "<e.g. 4h, 1d, 2-3 days>",
   "risk_level": "<low, medium, or high>",
-  "analysis_summary": "<brief explanation of the signal>"
+  "analysis_summary": "<2-3 sentence explanation of why price will move in this direction>"
 }
 PROMPT;
     }
@@ -317,27 +382,27 @@ PROMPT;
      */
     public function generateSignals(): array
     {
-        $cryptoPairs = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT'];
-        $forexPairs  = [
-            ['from' => 'EUR', 'to' => 'USD', 'pair' => 'EURUSD'],
-            ['from' => 'GBP', 'to' => 'USD', 'pair' => 'GBPUSD'],
-            ['from' => 'USD', 'to' => 'JPY', 'pair' => 'USDJPY'],
+        $cryptoPairs = [
+            ['symbol' => 'BTCUSDT', 'display' => 'BTC/USDT'],
+            ['symbol' => 'ETHUSDT', 'display' => 'ETH/USDT'],
+            ['symbol' => 'BNBUSDT', 'display' => 'BNB/USDT'],
+        ];
+        $forexPairs = [
+            ['from' => 'EUR', 'to' => 'USD', 'display' => 'EUR/USD'],
+            ['from' => 'GBP', 'to' => 'USD', 'display' => 'GBP/USD'],
+            ['from' => 'XAU', 'to' => 'USD', 'display' => 'XAU/USD'],
         ];
 
         $created = [];
 
-        foreach ($cryptoPairs as $symbol) {
-            $trade = $this->processPair($symbol, 'crypto');
-            if ($trade) {
-                $created[] = $trade;
-            }
+        foreach ($cryptoPairs as $crypto) {
+            $trade = $this->processPair($crypto['symbol'], 'crypto', $crypto['display']);
+            if ($trade) $created[] = $trade;
         }
 
         foreach ($forexPairs as $forex) {
-            $trade = $this->processPair($forex['pair'], 'forex');
-            if ($trade) {
-                $created[] = $trade;
-            }
+            $trade = $this->processForexPair($forex['from'], $forex['to'], $forex['display']);
+            if ($trade) $created[] = $trade;
         }
 
         Log::info('AITradeService: generated ' . count($created) . ' signals.');
@@ -346,73 +411,87 @@ PROMPT;
     }
 
     /**
-     * Process a single trading pair and store the signal as a Trade record.
+     * Process a single crypto pair and store the signal as a Trade record.
      */
-    public function processPair(string $pair, string $category): ?Trade
+    public function processPair(string $symbol, string $category, string $displayPair = ''): ?Trade
     {
         try {
-            // Fetch market data
-            if ($category === 'forex' && strlen($pair) === 6) {
-                $from       = substr($pair, 0, 3);
-                $to         = substr($pair, 3, 3);
-                $marketData = $this->fetchForexData($from, $to);
-            } else {
-                $marketData = $this->fetchBinanceData($pair);
-            }
+            $marketData = $this->fetchCryptoData($symbol);
 
             if (!$marketData || empty($marketData['prices'])) {
-                Log::warning("No market data for pair: {$pair}");
+                Log::warning("No market data for crypto pair: {$symbol}");
                 return null;
             }
 
-            $prices = $marketData['prices'];
-
-            // Enrich market data with indicators
-            $marketData['rsi']      = $this->calculateRSI($prices);
-            $marketData['ema9']     = $this->calculateEMA($prices, 9);
-            $marketData['ema21']    = $this->calculateEMA($prices, 21);
-            $marketData['trend']    = $this->determineTrend($prices);
-            $marketData['category'] = $category;
-
-            // Analyze with OpenAI
-            $signal = $this->analyzeWithOpenAI($marketData);
-
-            if (!$signal) {
-                Log::warning("No signal generated for pair: {$pair}");
-                return null;
-            }
-
-            // Only store signals with sufficient confidence
-            if ((int) $signal['confidence'] < 60) {
-                Log::info("Signal confidence too low for {$pair}: {$signal['confidence']}");
-                return null;
-            }
-
-            // Create Trade record
-            $trade = Trade::create([
-                'pair'             => $signal['pair'],
-                'type'             => strtoupper($signal['type']),
-                'entry'            => $signal['entry'],
-                'stop_loss'        => $signal['stop_loss'],
-                'take_profit'      => $signal['take_profit'],
-                'confidence'       => $signal['confidence'],
-                'duration'         => $signal['duration'],
-                'risk_level'       => $signal['risk_level'],
-                'analysis_summary' => $signal['analysis_summary'],
-                'category'         => $category,
-                'status'           => 'active',
-                'rsi'              => $marketData['rsi'],
-                'ema9'             => $marketData['ema9'],
-                'ema21'            => $marketData['ema21'],
-                'trend'            => $marketData['trend'],
-            ]);
-
-            Log::info("Trade created for {$pair}: ID {$trade->id}, confidence {$signal['confidence']}");
-
-            return $trade;
+            return $this->buildAndStoreTrade($marketData, $category, $displayPair ?: $symbol);
         } catch (\Throwable $e) {
-            Log::error("Exception processing pair {$pair}: " . $e->getMessage());
+            Log::error("Exception processing crypto pair {$symbol}: " . $e->getMessage());
             return null;
         }
+    }
+
+    /**
+     * Process a single forex pair.
+     */
+    public function processForexPair(string $from, string $to, string $displayPair): ?Trade
+    {
+        try {
+            $marketData = $this->fetchForexData($from, $to);
+
+            if (!$marketData || empty($marketData['prices'])) {
+                Log::warning("No market data for forex pair: {$from}/{$to}");
+                return null;
+            }
+
+            return $this->buildAndStoreTrade($marketData, 'forex', $displayPair);
+        } catch (\Throwable $e) {
+            Log::error("Exception processing forex pair {$from}/{$to}: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Enrich market data with indicators, call OpenAI, and persist the signal.
+     */
+    private function buildAndStoreTrade(array $marketData, string $category, string $displayPair): ?Trade
+    {
+        $prices = $marketData['prices'];
+
+        $marketData['display_pair'] = $displayPair;
+        $marketData['rsi']          = $this->calculateRSI($prices);
+        $marketData['ema9']         = $this->calculateEMA($prices, 9);
+        $marketData['ema21']        = $this->calculateEMA($prices, 21);
+        $marketData['trend']        = $this->determineTrend($prices);
+        $marketData['category']     = $category;
+
+        $signal = $this->analyzeWithOpenAI($marketData);
+
+        if (!$signal) {
+            Log::warning("No signal generated for pair: {$displayPair}");
+            return null;
+        }
+
+        if ((int) $signal['confidence'] < 70) {
+            Log::info("Signal confidence too low for {$displayPair}: {$signal['confidence']}");
+            return null;
+        }
+
+        $trade = Trade::create([
+            'pair'             => $displayPair,
+            'type'             => strtoupper($signal['type']),
+            'entry_price'      => $signal['entry'],
+            'stop_loss'        => $signal['stop_loss'],
+            'take_profit'      => $signal['take_profit'],
+            'confidence'       => min(100, (int) $signal['confidence']),
+            'duration'         => $signal['duration'],
+            'risk_level'       => $signal['risk_level'],
+            'analysis_summary' => $signal['analysis_summary'],
+            'category'         => $category,
+            'status'           => 'active',
+        ]);
+
+        Log::info("Trade created for {$displayPair}: ID {$trade->id}, confidence {$signal['confidence']}%");
+
+        return $trade;
     }
 }
