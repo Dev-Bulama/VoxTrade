@@ -2,7 +2,9 @@
 
 namespace Database\Seeders;
 
+use App\Models\Payment;
 use App\Models\Setting;
+use App\Models\Subscription;
 use App\Models\Trade;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
@@ -129,6 +131,98 @@ class DatabaseSeeder extends Seeder
 
         foreach ($trades as $trade) {
             Trade::create($trade);
+        }
+
+        // -----------------------------------------------------------------
+        // Dummy trader users
+        // -----------------------------------------------------------------
+        $dummyUsers = [
+            [
+                'name'     => 'James Okafor',
+                'email'    => 'james@voxtrade.io',
+                'password' => Hash::make('trader123'),
+                'role'     => 'trader',
+                'status'   => 'active',
+                'plan'     => 'monthly',
+                'expires'  => now()->addDays(25),
+            ],
+            [
+                'name'     => 'Amina Bello',
+                'email'    => 'amina@voxtrade.io',
+                'password' => Hash::make('trader123'),
+                'role'     => 'trader',
+                'status'   => 'active',
+                'plan'     => 'weekly',
+                'expires'  => now()->addDays(5),
+            ],
+            [
+                'name'     => 'Chidi Nwosu',
+                'email'    => 'chidi@voxtrade.io',
+                'password' => Hash::make('trader123'),
+                'role'     => 'trader',
+                'status'   => 'active',
+                'plan'     => 'daily',
+                'expires'  => now()->addHours(18),
+            ],
+            [
+                'name'     => 'Fatima Yusuf',
+                'email'    => 'fatima@voxtrade.io',
+                'password' => Hash::make('trader123'),
+                'role'     => 'trader',
+                'status'   => 'active',
+                'plan'     => null, // no subscription
+                'expires'  => null,
+            ],
+            [
+                'name'     => 'Emeka Adeyemi',
+                'email'    => 'emeka@voxtrade.io',
+                'password' => Hash::make('trader123'),
+                'role'     => 'trader',
+                'status'   => 'inactive',
+                'plan'     => null, // inactive account
+                'expires'  => null,
+            ],
+        ];
+
+        foreach ($dummyUsers as $data) {
+            $user = User::updateOrCreate(
+                ['email' => $data['email']],
+                [
+                    'name'     => $data['name'],
+                    'password' => $data['password'],
+                    'role'     => $data['role'],
+                    'status'   => $data['status'],
+                ]
+            );
+
+            if ($data['plan'] && $data['expires']) {
+                $planPrices = ['daily' => 500, 'weekly' => 2000, 'monthly' => 5000];
+                $amount     = $planPrices[$data['plan']] ?? 0;
+
+                $sub = Subscription::updateOrCreate(
+                    ['user_id' => $user->id],
+                    [
+                        'plan'       => $data['plan'],
+                        'amount'     => $amount,
+                        'currency'   => 'NGN',
+                        'expires_at' => $data['expires'],
+                        'status'     => 'active',
+                    ]
+                );
+
+                Payment::updateOrCreate(
+                    ['reference' => 'DEMO-' . strtoupper($data['plan']) . '-' . $user->id],
+                    [
+                        'user_id'          => $user->id,
+                        'subscription_id'  => $sub->id,
+                        'amount'           => $amount,
+                        'currency'         => 'NGN',
+                        'gateway'          => 'paystack',
+                        'status'           => 'successful',
+                        'gateway_response' => ['demo' => true],
+                    ]
+                );
+            }
         }
     }
 }
