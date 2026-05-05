@@ -104,51 +104,69 @@
 <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
 @foreach($activeSignals as $signal)
 @php
-    $isBuy     = strtoupper($signal->type) === 'BUY';
-    $entry     = (float) $signal->entry_price;
-    $sl        = (float) $signal->stop_loss;
-    $tp        = (float) $signal->take_profit;
-    $potential = $entry > 0 ? round(abs($tp - $entry) / $entry * 100, 2) : 0;
-    $riskPct   = $entry > 0 ? round(abs($sl - $entry) / $entry * 100, 2) : 0;
-    $rr        = $riskPct > 0 ? round($potential / $riskPct, 1) : 0;
-    $confColor = $signal->confidence >= 75 ? 'bg-green-500' : ($signal->confidence >= 60 ? 'bg-yellow-500' : 'bg-orange-500');
-    $confText  = $signal->confidence >= 75 ? 'text-green-400' : ($signal->confidence >= 60 ? 'text-yellow-400' : 'text-orange-400');
-    $decimals  = str_contains($signal->pair, 'JPY') ? 3 : (str_contains($signal->pair, 'USDT') || str_contains($signal->pair, 'XAU') ? 2 : 5);
+    use App\Services\AITradeService;
+
+    $isBuy      = strtoupper($signal->type) === 'BUY';
+    $entry      = (float) $signal->entry_price;
+    $sl         = (float) $signal->stop_loss;
+    $tp         = (float) $signal->take_profit;
+    $potential  = $entry > 0 ? round(abs($tp - $entry) / $entry * 100, 2) : 0;
+    $riskPct    = $entry > 0 ? round(abs($sl - $entry) / $entry * 100, 2) : 0;
+    $rr         = $riskPct > 0 ? round($potential / $riskPct, 1) : 0;
+    $confColor  = $signal->confidence >= 75 ? 'bg-green-500' : ($signal->confidence >= 60 ? 'bg-yellow-500' : 'bg-orange-500');
+    $confText   = $signal->confidence >= 75 ? 'text-green-400' : ($signal->confidence >= 60 ? 'text-yellow-400' : 'text-orange-400');
+    $decimals   = str_contains($signal->pair, 'JPY') ? 3 : (str_contains($signal->pair, 'USDT') || str_contains($signal->pair, 'XAU') ? 2 : 5);
+
+    // Duration / expiry
+    $durMins   = AITradeService::parseDurationMinutes($signal->duration ?? '');
+    $expiresTs = $signal->created_at->addMinutes($durMins)->timestamp;
+    $timeframe = match(true) {
+        $durMins <= 30   => ['label' => 'SCALP',   'cls' => 'bg-purple-500/15 text-purple-400 border-purple-500/30'],
+        $durMins <= 240  => ['label' => 'SHORT',   'cls' => 'bg-blue-500/15 text-blue-400 border-blue-500/30'],
+        $durMins <= 720  => ['label' => 'INTRADAY','cls' => 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'],
+        $durMins <= 1440 => ['label' => 'DAY',     'cls' => 'bg-orange-500/15 text-orange-400 border-orange-500/30'],
+        default          => ['label' => 'SWING',   'cls' => 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'],
+    };
 
     // MT4 format
-    $mt4Sym = str_replace('/', '', $signal->pair);
+    $mt4Sym  = str_replace('/', '', $signal->pair);
     $mt4Text = "=== VoxTrade AI Signal ===\nSymbol: {$mt4Sym}\nAction: " . strtoupper($signal->type) . "\nEntry Price: " . number_format($entry, $decimals) . "\nStop Loss: " . number_format($sl, $decimals) . "\nTake Profit: " . number_format($tp, $decimals) . "\nHold Duration: {$signal->duration}\nAI Confidence: {$signal->confidence}%\nRisk Level: " . ucfirst($signal->risk_level ?? 'medium') . "\n=========================\nExecute manually on MetaTrader 4/5";
 @endphp
 
 <div class="glass rounded-2xl p-4 border {{ $isBuy ? 'border-green-500/20' : 'border-red-500/20' }} relative overflow-hidden">
-    {{-- glow --}}
     <div class="absolute top-0 right-0 w-20 h-20 rounded-full opacity-5 blur-2xl pointer-events-none"
          style="background:{{ $isBuy ? '#22c55e' : '#ef4444' }};"></div>
 
-    {{-- Header --}}
-    <div class="flex items-center justify-between mb-2 relative z-10">
-        <div class="flex items-center gap-1.5">
-            <span class="relative flex h-2 w-2 shrink-0">
-                <span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 {{ $isBuy ? 'bg-green-400' : 'bg-red-400' }}"></span>
-                <span class="relative inline-flex rounded-full h-2 w-2 {{ $isBuy ? 'bg-green-500' : 'bg-red-500' }}"></span>
-            </span>
-            <span class="font-black text-[#D4AF37] text-sm">{{ $signal->pair }}</span>
-            <span class="text-[9px] text-gray-600 uppercase">{{ $signal->category }}</span>
+    {{-- Header: pair + live dot + timeframe badge + countdown --}}
+    <div class="flex items-start justify-between mb-2 relative z-10">
+        <div>
+            <div class="flex items-center gap-1.5 mb-1">
+                <span class="relative flex h-2 w-2 shrink-0">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 {{ $isBuy ? 'bg-green-400' : 'bg-red-400' }}"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 {{ $isBuy ? 'bg-green-500' : 'bg-red-500' }}"></span>
+                </span>
+                <span class="font-black text-[#D4AF37] text-sm">{{ $signal->pair }}</span>
+                <span class="badge border {{ $timeframe['cls'] }} text-[9px]">{{ $timeframe['label'] }}</span>
+            </div>
+            <div class="flex items-center gap-1">
+                <i class="fas fa-clock text-[9px] text-gray-600"></i>
+                <span class="text-[10px] font-semibold text-gray-400 countdown" data-expires="{{ $expiresTs }}">--</span>
+            </div>
         </div>
-        <span class="text-[10px] text-gray-600">{{ $signal->created_at->diffForHumans() }}</span>
+        <span class="text-[10px] text-gray-600 shrink-0 ml-2">{{ $signal->created_at->diffForHumans() }}</span>
     </div>
 
     {{-- Direction ── the most important element ── --}}
     <div class="flex items-center gap-2 mb-3 relative z-10">
-        <div class="{{ $isBuy ? 'bg-green-500/15 border-green-500/40' : 'bg-red-500/15 border-red-500/40' }} border rounded-xl px-3 py-1.5 flex items-center gap-2">
+        <div class="{{ $isBuy ? 'bg-green-500/15 border-green-500/40' : 'bg-red-500/15 border-red-500/40' }} border rounded-xl px-3 py-1.5 flex items-center gap-2 flex-1">
             <i class="fas fa-{{ $isBuy ? 'arrow-trend-up' : 'arrow-trend-down' }} text-lg {{ $isBuy ? 'text-green-400' : 'text-red-400' }}"></i>
             <div>
-                <p class="text-[9px] text-gray-500 leading-none mb-0.5">AI says</p>
-                <p class="text-lg font-black {{ $isBuy ? 'text-green-400' : 'text-red-400' }} leading-none">{{ strtoupper($signal->type) }}</p>
+                <p class="text-[9px] text-gray-500 leading-none mb-0.5">AI recommendation</p>
+                <p class="text-xl font-black {{ $isBuy ? 'text-green-400' : 'text-red-400' }} leading-none">{{ strtoupper($signal->type) }}</p>
             </div>
         </div>
         @if($rr > 0)
-        <div class="text-center">
+        <div class="text-center shrink-0">
             <p class="text-[9px] text-gray-500">R:R</p>
             <p class="text-sm font-black gold-text">1:{{ $rr }}</p>
         </div>
@@ -309,7 +327,35 @@ function copyMT4(id, btn) {
     });
 }
 
-// ── Auto-refresh countdown ──
+// ── Signal countdown timers ──
+document.querySelectorAll('.countdown[data-expires]').forEach(el => {
+    const expiresAt = parseInt(el.dataset.expires) * 1000;
+    function tick() {
+        const diff = expiresAt - Date.now();
+        if (diff <= 0) {
+            el.textContent = 'Window closed';
+            el.style.color = '#6b7280';
+            return;
+        }
+        const s = Math.floor(diff / 1000);
+        const d = Math.floor(s / 86400);
+        const h = Math.floor((s % 86400) / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const sec = s % 60;
+        if (d > 0)     el.textContent = `${d}d ${h}h left`;
+        else if (h > 0) el.textContent = `${h}h ${m}m left`;
+        else if (m > 0) el.textContent = `${m}m ${sec}s left`;
+        else            el.textContent = `${sec}s left`;
+        // Urgency colour
+        if (s < 300)       el.style.color = '#ef4444';   // <5 min
+        else if (s < 3600) el.style.color = '#eab308';   // <1 hr
+        else               el.style.color = '#22c55e';   // plenty of time
+    }
+    tick();
+    setInterval(tick, 1000);
+});
+
+// ── Page auto-refresh countdown ──
 let secs = 60;
 const el = document.getElementById('countdown');
 const timer = setInterval(() => {

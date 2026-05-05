@@ -273,36 +273,47 @@ PAST;
         }
 
         return <<<PROMPT
-You are an elite quantitative trading analyst. Your job is to generate a FORWARD-LOOKING trade signal for {$displayPair} — predict where price is headed next, not just what happened.
+You are an elite quantitative trading analyst generating a FORWARD-LOOKING trade signal for {$displayPair}.
 
 Current Market Data ({$category}):
 - Pair: {$displayPair}
-- Current Price: {$currentPrice}
-- RSI (14-period): {$rsi}
-- EMA 9: {$ema9}
-- EMA 21: {$ema21}
-- Trend Direction: {$trend}
+- Price: {$currentPrice}
+- RSI (14): {$rsi}
+- EMA 9: {$ema9}  |  EMA 21: {$ema21}
+- Trend: {$trend}
 - Volume: {$volume}
 {$pastContext}
 
-Rules:
-1. Only generate a signal if you are confident price will move in the predicted direction.
-2. Set stop loss at a key technical level, not arbitrary percentage.
-3. Take profit must offer at least 1.5× the risk (risk:reward ≥ 1:1.5).
-4. Confidence must reflect the true probability (aim for 75–90% only when conditions are clear).
-5. Duration should reflect how long to hold the position realistically.
+Signal Timeframe — choose ONE based on how strong the setup is:
+• SCALP  → "2 minutes" | "5 minutes" | "15 minutes" | "30 minutes"
+  (use only when RSI is extreme >80 or <20 with strong immediate momentum)
+• SHORT  → "1 hour" | "2 hours" | "3 hours" | "4 hours"
+  (clear EMA cross + confirming RSI, intraday move)
+• MID    → "6 hours" | "8 hours" | "12 hours"
+  (strong trend continuation with volume)
+• DAILY  → "1 day" | "2 days"
+  (multi-session trend, solid confluence across indicators)
+• SWING  → "3 days" | "5 days"
+  (major level break or sustained trend, weekly alignment)
 
-Respond ONLY with a valid JSON object — no markdown, no extra text:
+Rules:
+1. Only issue a signal when you are genuinely confident (≥70%).
+2. Stop loss MUST be at a meaningful technical level (support/resistance, not arbitrary %).
+3. Risk:reward MUST be at least 1:1.5 (take profit ≥ 1.5× the stop distance).
+4. Shorter durations require higher certainty — scalp signals need RSI extremes + volume.
+5. If conditions are mixed or unclear, set confidence below 70 — the system will reject it.
+
+Respond ONLY with a valid JSON object, no markdown, no extra text:
 {
   "pair": "{$displayPair}",
   "type": "BUY or SELL",
-  "entry": <entry price as number>,
-  "stop_loss": <stop loss price as number>,
-  "take_profit": <take profit price as number>,
+  "entry": <number>,
+  "stop_loss": <number>,
+  "take_profit": <number>,
   "confidence": <integer 0-100>,
-  "duration": "<e.g. 4h, 1d, 2-3 days>",
-  "risk_level": "<low, medium, or high>",
-  "analysis_summary": "<2-3 sentence explanation of why price will move in this direction>"
+  "duration": "<exact string from the list above, e.g. '5 minutes' or '4 hours' or '2 days'>",
+  "risk_level": "<low | medium | high>",
+  "analysis_summary": "<2-3 sentences: what the indicators say and why price will move this direction>"
 }
 PROMPT;
     }
@@ -380,8 +391,64 @@ PROMPT;
     }
 
     /**
-     * All pairs the AI engine monitors continuously.
+     * Parse a duration string into minutes.
+     * Handles: "2 minutes", "5m", "1 hour", "4hr", "1 day", "2-3 days", "Intraday", "Swing"
      */
+    public static function parseDurationMinutes(string $duration): int
+    {
+        $d = strtolower(trim($duration));
+
+        // Minutes: "5 minutes", "15 min", "30m", "2mins"
+        if (preg_match('/(\d+)\s*min/i', $d, $m)) {
+            return max(1, (int) $m[1]);
+        }
+
+        // Hours: "1 hour", "2 hours", "1hr", "4h", "1.5 hours"
+        if (preg_match('/(\d+(?:\.\d+)?)\s*h(?:ou?rs?|r)?(?:\s|$)/i', $d, $m)) {
+            return (int) round((float) $m[1] * 60);
+        }
+
+        // Days: "1 day", "2 days", "2-3 days" (use lower bound)
+        if (preg_match('/(\d+)(?:-\d+)?\s*day/i', $d, $m)) {
+            return (int) $m[1] * 1440;
+        }
+
+        if (str_contains($d, 'scalp'))   return 5;
+        if (str_contains($d, 'intraday')) return 240;
+        if (str_contains($d, 'swing'))   return 2880;
+
+        return 240; // default 4 hours
+    }
+
+    /**
+     * Return true if the pair already has an unexpired active signal.
+     */
+    private function hasFreshSignal(string $pair): bool
+    {
+        $active = Trade::where('pair', $pair)->where('status', 'active')->latest()->first();
+        if (!$active) return false;
+        $expiresAt = $active->created_at->addMinutes(self::parseDurationMinutes($active->duration ?? ''));
+        return $expiresAt->isFuture();
+    }
+
+    /**
+     * Expire all active signals whose duration window has passed.
+     */
+    private function expireStaleSignals(): void
+    {
+        $active = Trade::where('status', 'active')->get(['id', 'duration', 'created_at']);
+        $expiredIds = [];
+        foreach ($active as $trade) {
+            $expiresAt = $trade->created_at->addMinutes(self::parseDurationMinutes($trade->duration ?? ''));
+            if ($expiresAt->isPast()) {
+                $expiredIds[] = $trade->id;
+            }
+        }
+        if (!empty($expiredIds)) {
+            Trade::whereIn('id', $expiredIds)->update(['status' => 'expired']);
+            Log::info('AITradeService: duration-expired ' . count($expiredIds) . ' signal(s).');
+        }
+    }
     public static function watchedPairs(): array
     {
         return [
@@ -414,20 +481,26 @@ PROMPT;
 
         $created = [];
 
+        // Expire stale signals first so hasFreshSignal() sees clean state
+        $this->expireStaleSignals();
+
         foreach ($cryptoPairs as $crypto) {
+            if ($this->hasFreshSignal($crypto['display'])) {
+                Log::info("AITradeService: skipping {$crypto['display']} — unexpired signal exists.");
+                continue;
+            }
             $trade = $this->processPair($crypto['symbol'], 'crypto', $crypto['display']);
             if ($trade) $created[] = $trade;
         }
 
         foreach ($forexPairs as $forex) {
+            if ($this->hasFreshSignal($forex['display'])) {
+                Log::info("AITradeService: skipping {$forex['display']} — unexpired signal exists.");
+                continue;
+            }
             $trade = $this->processForexPair($forex['from'], $forex['to'], $forex['display']);
             if ($trade) $created[] = $trade;
         }
-
-        // Expire active signals whose duration has likely passed
-        Trade::where('status', 'active')
-            ->where('created_at', '<', now()->subHours(24))
-            ->update(['status' => 'expired']);
 
         Log::info('AITradeService: generated ' . count($created) . ' signals.');
 

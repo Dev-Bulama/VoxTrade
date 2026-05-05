@@ -9,4 +9,5 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Schedule::job(new AnalyzeMarketJob)->everyFiveMinutes();
+// Run every minute; job skips pairs that still have unexpired active signals
+Schedule::job(new AnalyzeMarketJob)->everyMinute();

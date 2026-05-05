@@ -83,6 +83,8 @@
 
 @forelse($signals as $signal)
 @php
+    use App\Services\AITradeService;
+
     $isActive  = $signal->status === 'active';
     $isBuy     = strtoupper($signal->type) === 'BUY';
     $entry     = (float) $signal->entry_price;
@@ -104,10 +106,21 @@
         'medium' => 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20',
         'high'   => 'text-red-400 bg-red-500/10 border-red-500/20',
     ];
-    $riskCls  = $riskMap[$signal->risk_level ?? 'medium'] ?? $riskMap['medium'];
-    $confColor = $signal->confidence >= 75 ? 'bg-green-500' : ($signal->confidence >= 50 ? 'bg-yellow-500' : 'bg-red-500');
-    $confText  = $signal->confidence >= 75 ? 'text-green-400' : ($signal->confidence >= 50 ? 'text-yellow-400' : 'text-red-400');
+    $riskCls    = $riskMap[$signal->risk_level ?? 'medium'] ?? $riskMap['medium'];
+    $confColor  = $signal->confidence >= 75 ? 'bg-green-500' : ($signal->confidence >= 50 ? 'bg-yellow-500' : 'bg-red-500');
+    $confText   = $signal->confidence >= 75 ? 'text-green-400' : ($signal->confidence >= 50 ? 'text-yellow-400' : 'text-red-400');
     $cardBorder = $isActive ? ($isBuy ? 'border-green-500/25' : 'border-red-500/25') : 'border-white/5';
+
+    // Duration + timeframe
+    $durMins   = AITradeService::parseDurationMinutes($signal->duration ?? '');
+    $expiresTs = $signal->created_at->addMinutes($durMins)->timestamp;
+    $timeframe = match(true) {
+        $durMins <= 30   => ['label' => 'SCALP',    'cls' => 'bg-purple-500/15 text-purple-400 border-purple-500/30'],
+        $durMins <= 240  => ['label' => 'SHORT',    'cls' => 'bg-blue-500/15 text-blue-400 border-blue-500/30'],
+        $durMins <= 720  => ['label' => 'INTRADAY', 'cls' => 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'],
+        $durMins <= 1440 => ['label' => 'DAY',      'cls' => 'bg-orange-500/15 text-orange-400 border-orange-500/30'],
+        default          => ['label' => 'SWING',    'cls' => 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'],
+    };
 @endphp
 
 <a href="{{ route('signals.show', $signal) }}" class="block group">
@@ -119,9 +132,10 @@
          style="background:{{ $isBuy ? '#22c55e' : '#ef4444' }};"></div>
     @endif
 
-    {{-- ── Header: pair name + live dot + timestamp ── --}}
+    {{-- ── Header: pair name + live dot + timeframe badge ── --}}
     <div class="flex items-start justify-between mb-3 relative z-10">
-        <div class="flex items-center gap-2">
+        <div>
+        <div class="flex items-center gap-2 mb-1">
             @if($isActive)
             <span class="relative flex h-2.5 w-2.5 shrink-0 mt-0.5">
                 <span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 {{ $isBuy ? 'bg-green-400' : 'bg-red-400' }}"></span>
@@ -129,6 +143,14 @@
             </span>
             @endif
             <span class="text-lg font-black text-[#D4AF37] tracking-wide">{{ $signal->pair }}</span>
+            <span class="badge border {{ $timeframe['cls'] }} text-[9px]">{{ $timeframe['label'] }}</span>
+        </div>
+        @if($isActive)
+        <div class="flex items-center gap-1 mt-0.5">
+            <i class="fas fa-hourglass-half text-[9px] text-gray-600"></i>
+            <span class="text-[10px] font-semibold countdown" data-expires="{{ $expiresTs }}">--</span>
+        </div>
+        @endif
         </div>
         <span class="text-[10px] text-gray-600 shrink-0 ml-2">{{ $signal->created_at->diffForHumans() }}</span>
     </div>
@@ -262,6 +284,26 @@
 
 @push('scripts')
 <script>
+// ── Signal countdown timers ──
+document.querySelectorAll('.countdown[data-expires]').forEach(el => {
+    const expiresAt = parseInt(el.dataset.expires) * 1000;
+    function tick() {
+        const diff = expiresAt - Date.now();
+        if (diff <= 0) { el.textContent = 'Window closed'; el.style.color = '#6b7280'; return; }
+        const s = Math.floor(diff / 1000);
+        const d = Math.floor(s / 86400);
+        const h = Math.floor((s % 86400) / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const sec = s % 60;
+        if (d > 0)      el.textContent = `${d}d ${h}h left`;
+        else if (h > 0) el.textContent = `${h}h ${m}m left`;
+        else if (m > 0) el.textContent = `${m}m ${sec}s left`;
+        else            el.textContent = `${sec}s left`;
+        el.style.color = s < 300 ? '#ef4444' : s < 3600 ? '#eab308' : '#22c55e';
+    }
+    tick(); setInterval(tick, 1000);
+});
+
 function setFilter(group, value) {
     document.getElementById('f_' + group).value = value;
     document.querySelectorAll('[data-group="' + group + '"]').forEach(btn => {
