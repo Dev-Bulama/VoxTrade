@@ -40,11 +40,6 @@ class AnalyzeMarketJob implements ShouldQueue
             'trade_ids'       => array_map(fn($t) => $t->id, $trades),
         ]);
 
-        // Expire active trades older than 24 hours
-        $expired = Trade::where('status', 'active')
-            ->where('created_at', '<', now()->subHours(24))
-            ->update(['status' => 'expired']);
-
-        Log::info("AnalyzeMarketJob: expired {$expired} stale trade(s) older than 24 hours.");
+        // Signal expiry is handled inside AITradeService::generateSignals()
     }
 }

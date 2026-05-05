@@ -136,31 +136,36 @@
 
     <!-- ── Bottom Navigation ── -->
     <nav class="fixed bottom-0 left-0 right-0 z-50 glass border-t border-[#D4AF37]/20">
-        <div class="max-w-2xl mx-auto flex items-center justify-around px-2 py-2">
+        <div class="max-w-2xl mx-auto flex items-center justify-around px-1 py-1.5">
             <a href="{{ route('dashboard') }}"
-               class="flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg transition {{ request()->routeIs('dashboard') ? 'nav-active' : 'nav-inactive hover:text-gray-300' }}">
-                <i class="fas fa-house text-lg"></i>
-                <span class="text-[10px] font-medium">Home</span>
+               class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition {{ request()->routeIs('dashboard') ? 'nav-active' : 'nav-inactive hover:text-gray-300' }}">
+                <i class="fas fa-house text-base"></i>
+                <span class="text-[9px] font-medium">Home</span>
             </a>
             <a href="{{ route('signals.index') }}"
-               class="flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg transition {{ request()->routeIs('signals.*') ? 'nav-active' : 'nav-inactive hover:text-gray-300' }}">
-                <i class="fas fa-signal text-lg"></i>
-                <span class="text-[10px] font-medium">Signals</span>
+               class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition {{ request()->routeIs('signals.*') ? 'nav-active' : 'nav-inactive hover:text-gray-300' }}">
+                <i class="fas fa-bolt text-base"></i>
+                <span class="text-[9px] font-medium">Signals</span>
             </a>
             <a href="{{ route('performance') }}"
-               class="flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg transition {{ request()->routeIs('performance') ? 'nav-active' : 'nav-inactive hover:text-gray-300' }}">
-                <i class="fas fa-chart-line text-lg"></i>
-                <span class="text-[10px] font-medium">Analytics</span>
+               class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition {{ request()->routeIs('performance') ? 'nav-active' : 'nav-inactive hover:text-gray-300' }}">
+                <i class="fas fa-chart-line text-base"></i>
+                <span class="text-[9px] font-medium">Analytics</span>
+            </a>
+            <a href="{{ route('how-it-works') }}"
+               class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition {{ request()->routeIs('how-it-works') ? 'nav-active' : 'nav-inactive hover:text-gray-300' }}">
+                <i class="fas fa-book-open text-base"></i>
+                <span class="text-[9px] font-medium">Guide</span>
             </a>
             <a href="{{ route('subscription.status') }}"
-               class="flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg transition {{ request()->routeIs('subscription.*') ? 'nav-active' : 'nav-inactive hover:text-gray-300' }}">
-                <i class="fas fa-crown text-lg"></i>
-                <span class="text-[10px] font-medium">Plan</span>
+               class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition {{ request()->routeIs('subscription.*') ? 'nav-active' : 'nav-inactive hover:text-gray-300' }}">
+                <i class="fas fa-crown text-base"></i>
+                <span class="text-[9px] font-medium">Plan</span>
             </a>
             <a href="{{ route('profile.edit') }}"
-               class="flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg transition {{ request()->routeIs('profile.*') ? 'nav-active' : 'nav-inactive hover:text-gray-300' }}">
-                <i class="fas fa-user text-lg"></i>
-                <span class="text-[10px] font-medium">Profile</span>
+               class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition {{ request()->routeIs('profile.*') ? 'nav-active' : 'nav-inactive hover:text-gray-300' }}">
+                <i class="fas fa-user text-base"></i>
+                <span class="text-[9px] font-medium">Profile</span>
             </a>
         </div>
     </nav>

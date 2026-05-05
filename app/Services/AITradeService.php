@@ -77,50 +77,52 @@ class AITradeService
     }
 
     /**
-     * Fetch forex data from Alpha Vantage.
+     * Fetch forex/commodity data from Yahoo Finance (no API key, no rate limits).
      */
     public function fetchForexData(string $fromCurrency, string $toCurrency): ?array
     {
-        try {
-            $apiKey = ApiKey::where('service_name', 'alpha_vantage')->value('api_key')
-                ?? config('services.alphavantage.key', '');
+        // Build Yahoo Finance symbol; gold/silver use futures codes
+        $from = strtoupper($fromCurrency);
+        $to   = strtoupper($toCurrency);
+        $sym  = match(true) {
+            $from === 'XAU' => 'GC=F',   // Gold futures
+            $from === 'XAG' => 'SI=F',   // Silver futures
+            $from === 'OIL' => 'CL=F',   // Crude oil futures
+            default         => "{$from}{$to}=X",
+        };
 
-            $response = Http::get('https://www.alphavantage.co/query', [
-                'function'    => 'FX_INTRADAY',
-                'from_symbol' => $fromCurrency,
-                'to_symbol'   => $toCurrency,
-                'interval'    => '60min',
-                'apikey'      => $apiKey,
+        try {
+            $response = Http::withHeaders([
+                'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept'     => 'application/json',
+            ])->timeout(15)->get("https://query1.finance.yahoo.com/v8/finance/chart/{$sym}", [
+                'interval' => '1h',
+                'range'    => '2d',
             ]);
 
             if (!$response->successful()) {
-                Log::warning("Alpha Vantage request failed for {$fromCurrency}/{$toCurrency}");
+                Log::warning("Yahoo Finance failed for {$sym}", ['status' => $response->status()]);
                 return null;
             }
 
-            $data = $response->json();
-            $timeSeriesKey = 'Time Series FX (60min)';
+            $chartData = $response->json('chart.result.0');
+            if (!$chartData) return null;
 
-            if (empty($data[$timeSeriesKey])) {
-                Log::warning("Alpha Vantage returned no time series for {$fromCurrency}/{$toCurrency}", ['response' => $data]);
-                return null;
-            }
+            $closes = array_values(array_filter(
+                $chartData['indicators']['quote'][0]['close'] ?? [],
+                fn($v) => $v !== null
+            ));
 
-            $timeSeries = $data[$timeSeriesKey];
-            // Sort by time ascending
-            ksort($timeSeries);
-
-            $prices = array_map(fn($bar) => (float) $bar['4. close'], array_values($timeSeries));
-            $currentPrice = end($prices);
+            if (empty($closes)) return null;
 
             return [
-                'symbol'        => $fromCurrency . $toCurrency,
-                'prices'        => $prices,
-                'current_price' => $currentPrice,
+                'symbol'        => "{$from}{$to}",
+                'prices'        => $closes,
+                'current_price' => end($closes),
                 'volume'        => null,
             ];
         } catch (\Throwable $e) {
-            Log::error("Exception fetching Alpha Vantage data for {$fromCurrency}/{$toCurrency}: " . $e->getMessage());
+            Log::error("Exception fetching Yahoo Finance {$sym}: " . $e->getMessage());
             return null;
         }
     }
@@ -378,20 +380,37 @@ PROMPT;
     }
 
     /**
-     * Generate signals for all default crypto and forex pairs.
+     * All pairs the AI engine monitors continuously.
+     */
+    public static function watchedPairs(): array
+    {
+        return [
+            // Crypto
+            ['type' => 'crypto', 'symbol' => 'BTCUSDT', 'display' => 'BTC/USDT'],
+            ['type' => 'crypto', 'symbol' => 'ETHUSDT', 'display' => 'ETH/USDT'],
+            ['type' => 'crypto', 'symbol' => 'BNBUSDT', 'display' => 'BNB/USDT'],
+            ['type' => 'crypto', 'symbol' => 'SOLUSDT', 'display' => 'SOL/USDT'],
+            ['type' => 'crypto', 'symbol' => 'XRPUSDT', 'display' => 'XRP/USDT'],
+            ['type' => 'crypto', 'symbol' => 'ADAUSDT', 'display' => 'ADA/USDT'],
+            // Forex & Commodities
+            ['type' => 'forex', 'from' => 'EUR', 'to' => 'USD', 'display' => 'EUR/USD'],
+            ['type' => 'forex', 'from' => 'GBP', 'to' => 'USD', 'display' => 'GBP/USD'],
+            ['type' => 'forex', 'from' => 'USD', 'to' => 'JPY', 'display' => 'USD/JPY'],
+            ['type' => 'forex', 'from' => 'XAU', 'to' => 'USD', 'display' => 'XAU/USD'],
+            ['type' => 'forex', 'from' => 'AUD', 'to' => 'USD', 'display' => 'AUD/USD'],
+            ['type' => 'forex', 'from' => 'GBP', 'to' => 'JPY', 'display' => 'GBP/JPY'],
+            ['type' => 'forex', 'from' => 'USD', 'to' => 'CHF', 'display' => 'USD/CHF'],
+            ['type' => 'forex', 'from' => 'EUR', 'to' => 'JPY', 'display' => 'EUR/JPY'],
+        ];
+    }
+
+    /**
+     * Generate signals for all watched pairs.
      */
     public function generateSignals(): array
     {
-        $cryptoPairs = [
-            ['symbol' => 'BTCUSDT', 'display' => 'BTC/USDT'],
-            ['symbol' => 'ETHUSDT', 'display' => 'ETH/USDT'],
-            ['symbol' => 'BNBUSDT', 'display' => 'BNB/USDT'],
-        ];
-        $forexPairs = [
-            ['from' => 'EUR', 'to' => 'USD', 'display' => 'EUR/USD'],
-            ['from' => 'GBP', 'to' => 'USD', 'display' => 'GBP/USD'],
-            ['from' => 'XAU', 'to' => 'USD', 'display' => 'XAU/USD'],
-        ];
+        $cryptoPairs = array_filter(self::watchedPairs(), fn($p) => $p['type'] === 'crypto');
+        $forexPairs  = array_filter(self::watchedPairs(), fn($p) => $p['type'] === 'forex');
 
         $created = [];
 
@@ -404,6 +423,11 @@ PROMPT;
             $trade = $this->processForexPair($forex['from'], $forex['to'], $forex['display']);
             if ($trade) $created[] = $trade;
         }
+
+        // Expire active signals whose duration has likely passed
+        Trade::where('status', 'active')
+            ->where('created_at', '<', now()->subHours(24))
+            ->update(['status' => 'expired']);
 
         Log::info('AITradeService: generated ' . count($created) . ' signals.');
 
