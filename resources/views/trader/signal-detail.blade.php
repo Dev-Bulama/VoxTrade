@@ -201,10 +201,10 @@
 </div>
 
 {{-- ── Analysis Summary ── --}}
-@if(!empty($signal->analysis))
+@if(!empty($signal->analysis_summary))
 <div class="glass rounded-2xl p-5 mb-4">
     <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">AI Analysis</h2>
-    <p class="text-sm text-gray-300 leading-relaxed">{{ $signal->analysis }}</p>
+    <p class="text-sm text-gray-300 leading-relaxed">{{ $signal->analysis_summary }}</p>
 </div>
 @endif
 
