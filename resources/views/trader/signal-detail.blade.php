@@ -4,6 +4,8 @@
 @section('content')
 
 @php
+    use App\Services\AITradeService;
+
     $isBuy     = strtolower($signal->type) === 'buy';
     $entry     = (float) $signal->entry_price;
     $sl        = (float) $signal->stop_loss;
@@ -11,6 +13,16 @@
     $potential = $entry > 0 ? round(abs($tp - $entry) / $entry * 100, 2) : 0;
     $risk      = $entry > 0 ? round(abs($sl - $entry) / $entry * 100, 2) : 0;
     $rr        = $risk > 0  ? round($potential / $risk, 2) : 0;
+    $durMins   = AITradeService::parseDurationMinutes($signal->duration ?? '');
+    $expiresTs = $signal->created_at->addMinutes($durMins)->timestamp;
+    $decimals  = str_contains($signal->pair, 'JPY') ? 3 : (str_contains($signal->pair, 'USDT') || str_contains($signal->pair, 'XAU') ? 2 : 5);
+    $timeframe = match(true) {
+        $durMins <= 30   => ['label' => 'SCALP',    'cls' => 'bg-purple-500/15 text-purple-400 border-purple-500/30'],
+        $durMins <= 240  => ['label' => 'SHORT',    'cls' => 'bg-blue-500/15 text-blue-400 border-blue-500/30'],
+        $durMins <= 720  => ['label' => 'INTRADAY', 'cls' => 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'],
+        $durMins <= 1440 => ['label' => 'DAY',      'cls' => 'bg-orange-500/15 text-orange-400 border-orange-500/30'],
+        default          => ['label' => 'SWING',    'cls' => 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'],
+    };
 
     $statusMap = [
         'active'  => ['label' => 'Active',  'icon' => 'circle-dot',       'cls' => 'bg-green-500/15 text-green-400 border-green-500/30'],
@@ -158,6 +170,26 @@
     </div>
 </div>
 
+{{-- ── Live Countdown ── --}}
+@if($signal->status === 'active')
+<div class="glass rounded-2xl p-5 mb-4 border border-{{ $isBuy ? 'green' : 'red' }}-500/20">
+    <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">Trade Window</h2>
+    <div class="flex items-center justify-between">
+        <div>
+            <p class="text-3xl font-black countdown" data-expires="{{ $expiresTs }}">--</p>
+            <p class="text-xs text-gray-500 mt-1">remaining — execute now on MetaTrader</p>
+        </div>
+        <div class="text-right">
+            <span class="badge border {{ $timeframe['cls'] }}">{{ $timeframe['label'] }}</span>
+            <p class="text-[10px] text-gray-600 mt-1">Hold: {{ $signal->duration }}</p>
+        </div>
+    </div>
+    <div class="mt-3 h-1.5 rounded-full bg-[#1e1e1e] overflow-hidden">
+        <div id="timeProgress" class="h-full rounded-full bg-[#D4AF37] transition-all" style="width:100%"></div>
+    </div>
+</div>
+@endif
+
 {{-- ── Signal Details ── --}}
 <div class="glass rounded-2xl p-5 mb-4">
     <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-4">Signal Details</h2>
@@ -233,6 +265,50 @@
 
 @push('scripts')
 <script>
+// ── Live countdown timer ──
+(function() {
+    const el = document.querySelector('.countdown[data-expires]');
+    const bar = document.getElementById('timeProgress');
+    if (!el) return;
+
+    const expiresAt  = parseInt(el.dataset.expires) * 1000;
+    const createdAt  = expiresAt - ({{ $durMins }} * 60 * 1000);
+    const totalSpan  = expiresAt - createdAt;
+
+    function tick() {
+        const diff = expiresAt - Date.now();
+        if (diff <= 0) {
+            el.textContent = 'Window closed';
+            el.style.color = '#6b7280';
+            if (bar) bar.style.width = '0%';
+            return;
+        }
+        const s   = Math.floor(diff / 1000);
+        const d   = Math.floor(s / 86400);
+        const h   = Math.floor((s % 86400) / 3600);
+        const m   = Math.floor((s % 3600) / 60);
+        const sec = s % 60;
+
+        if (d > 0)      el.textContent = `${d}d ${h}h ${m}m left`;
+        else if (h > 0) el.textContent = `${h}h ${m}m ${sec}s left`;
+        else if (m > 0) el.textContent = `${m}m ${sec}s left`;
+        else            el.textContent = `${sec}s left`;
+
+        if (s < 300)       el.style.color = '#ef4444';
+        else if (s < 3600) el.style.color = '#eab308';
+        else               el.style.color = '#22c55e';
+
+        // Shrinking progress bar
+        if (bar) {
+            const pct = Math.max(0, (diff / totalSpan) * 100);
+            bar.style.width = pct + '%';
+            bar.style.background = s < 300 ? '#ef4444' : s < 3600 ? '#eab308' : '#D4AF37';
+        }
+    }
+    tick();
+    setInterval(tick, 1000);
+})();
+
 function shareSignal() {
     const text = '{{ $signal->pair }} {{ strtoupper($signal->type) }} signal — Entry: {{ number_format($entry, 5) }} | SL: {{ number_format($sl, 5) }} | TP: {{ number_format($tp, 5) }} | {{ $signal->confidence }}% confidence | VoxTrade';
     if (navigator.share) {
