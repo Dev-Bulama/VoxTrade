@@ -104,8 +104,6 @@
 <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
 @foreach($activeSignals as $signal)
 @php
-    use App\Services\AITradeService;
-
     $isBuy      = strtoupper($signal->type) === 'BUY';
     $entry      = (float) $signal->entry_price;
     $sl         = (float) $signal->stop_loss;
@@ -118,7 +116,7 @@
     $decimals   = str_contains($signal->pair, 'JPY') ? 3 : (str_contains($signal->pair, 'USDT') || str_contains($signal->pair, 'XAU') ? 2 : 5);
 
     // Duration / expiry
-    $durMins   = AITradeService::parseDurationMinutes($signal->duration ?? '');
+    $durMins   = \App\Services\AITradeService::parseDurationMinutes($signal->duration ?? '');
     $expiresTs = $signal->created_at->addMinutes($durMins)->timestamp;
     $timeframe = match(true) {
         $durMins <= 30   => ['label' => 'SCALP',   'cls' => 'bg-purple-500/15 text-purple-400 border-purple-500/30'],
