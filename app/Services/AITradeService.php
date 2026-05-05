@@ -55,7 +55,7 @@ class AITradeService
     public function fetchForexData(string $fromCurrency, string $toCurrency): ?array
     {
         try {
-            $apiKey = ApiKey::where('provider', 'alphavantage')->value('api_key')
+            $apiKey = ApiKey::where('service_name', 'alpha_vantage')->value('api_key')
                 ?? config('services.alphavantage.key', '');
 
             $response = Http::get('https://www.alphavantage.co/query', [
@@ -246,7 +246,7 @@ PROMPT;
     public function analyzeWithOpenAI(array $marketData): ?array
     {
         try {
-            $apiKey = ApiKey::where('provider', 'openai')->value('api_key')
+            $apiKey = ApiKey::where('service_name', 'openai')->value('api_key')
                 ?? config('services.openai.key', '');
 
             if (empty($apiKey)) {

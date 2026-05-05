@@ -44,12 +44,24 @@ class ApiKey extends Model
     /**
      * Retrieve the decrypted API key for a given service, or null if not found.
      */
-    public static function getKey(string $service): ?string
+    public static function getApiKey(string $service): ?string
     {
         $record = static::where('service_name', $service)
             ->where('is_active', true)
             ->first();
 
         return $record?->api_key;
+    }
+
+    /**
+     * Retrieve the decrypted API secret for a given service, or null if not found.
+     */
+    public static function getApiSecret(string $service): ?string
+    {
+        $record = static::where('service_name', $service)
+            ->where('is_active', true)
+            ->first();
+
+        return $record?->api_secret;
     }
 }
