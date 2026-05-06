@@ -21,6 +21,9 @@ class SignalController extends Controller
 
     public function index(Request $request)
     {
+        // Expire stale signals before querying — never show expired signals on page load
+        app(AITradeService::class)->expireStaleSignals();
+
         // Priority sort: highest confidence first, then most recent
         $query     = Trade::orderByDesc('confidence')->orderByDesc('created_at');
         $category  = $request->input('category', 'all');

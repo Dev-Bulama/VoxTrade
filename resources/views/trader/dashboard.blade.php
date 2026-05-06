@@ -348,20 +348,23 @@ function copyMT4(id, btn) {
 const knownIds = new Set([{{ $activeSignals->pluck('id')->implode(',') }}]);
 
 function animateCardOut(card) {
-    card.style.transition = 'opacity 0.55s ease, transform 0.55s ease';
+    if (!card || !document.contains(card)) return; // already removed
+    card.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
     card.style.opacity    = '0';
-    card.style.transform  = 'scale(0.9) translateY(-6px)';
+    card.style.transform  = 'scale(0.9) translateY(-8px)';
     setTimeout(() => {
-        card.style.overflow   = 'hidden';
-        card.style.maxHeight  = card.offsetHeight + 'px';
+        if (!document.contains(card)) return;
+        const h = card.offsetHeight;
+        card.style.overflow  = 'hidden';
+        card.style.maxHeight = h + 'px';
         requestAnimationFrame(() => {
-            card.style.transition += ', max-height 0.45s ease, margin 0.45s ease, padding 0.45s ease';
+            card.style.transition += ', max-height 0.4s ease, margin 0.4s ease, padding 0.4s ease';
             card.style.maxHeight  = '0';
             card.style.margin     = '0';
             card.style.padding    = '0';
-            setTimeout(() => card.remove(), 460);
+            setTimeout(() => { if (document.contains(card)) card.remove(); }, 420);
         });
-    }, 560);
+    }, 520);
 }
 
 function showNewSignalBanner(count) {
@@ -421,26 +424,31 @@ async function pollSignals() {
     } catch(e) { /* silent */ }
 }
 
-setInterval(pollSignals, 30000);
+// Poll immediately on load (1s delay), then every 15s — catches any stale signals instantly
+setTimeout(pollSignals, 1000);
+setInterval(pollSignals, 15000);
 
 // ── Signal countdown timers (also auto-remove on expiry) ──
 document.querySelectorAll('.countdown[data-expires]').forEach(el => {
     const expiresAt = parseInt(el.dataset.expires) * 1000;
+    let timerId; // must be declared before tick so closure can reference it
+
     function tick() {
         const diff = expiresAt - Date.now();
         if (diff <= 0) {
+            clearInterval(timerId); // stop firing — prevents repeated animateCardOut calls
             el.textContent = 'Window closed';
             el.style.color = '#6b7280';
-            // Animate the card out immediately
             const card = el.closest('[data-signal-id]');
-            if (card) {
+            if (card && !card.dataset.removing) { // guard against duplicate removal
+                card.dataset.removing = '1';
                 const sigId = parseInt(card.dataset.signalId);
                 setTimeout(() => {
                     animateCardOut(card);
                     knownIds.delete(sigId);
                     const countEl = document.getElementById('activeCount');
                     if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
-                }, 2000);
+                }, 1500);
             }
             return;
         }
@@ -456,7 +464,7 @@ document.querySelectorAll('.countdown[data-expires]').forEach(el => {
         el.style.color = s < 300 ? '#ef4444' : s < 3600 ? '#eab308' : '#22c55e';
     }
     tick();
-    setInterval(tick, 1000);
+    timerId = setInterval(tick, 1000);
 });
 </script>
 @endpush

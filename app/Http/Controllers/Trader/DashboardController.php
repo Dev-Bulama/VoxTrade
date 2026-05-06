@@ -11,8 +11,19 @@ class DashboardController extends Controller
 {
     public function index()
     {
+        // Expire stale signals before querying — ensures page load never shows expired cards
+        app(AITradeService::class)->expireStaleSignals();
+
         $user          = auth()->user();
-        $activeSignals = Trade::where('status', 'active')->orderByDesc('confidence')->get();
+        $activeSignals = Trade::where('status', 'active')
+            ->orderByDesc('confidence')
+            ->orderByDesc('created_at')
+            ->get()
+            // Belt-and-suspenders: filter out any that slipped through DB cleanup
+            ->filter(function ($s) {
+                $mins = AITradeService::parseDurationMinutes($s->duration ?? '');
+                return $s->created_at->addMinutes($mins)->isFuture();
+            });
         $activeCount   = $activeSignals->count();
         $totalSignals  = Trade::count();
         $winRate       = $this->calculateWinRate();

@@ -115,6 +115,22 @@
     </div>
 </form>
 
+{{-- New signal notification banner --}}
+<div id="newSigBanner" class="opacity-0 pointer-events-none transition-opacity duration-300 mb-3">
+    <div class="flex items-center gap-3 bg-[#0f1e0f]/90 border border-green-500/40 rounded-xl px-4 py-2.5">
+        <span class="relative flex h-2 w-2 shrink-0">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+        </span>
+        <p class="text-xs font-semibold text-green-300 flex-1" id="newSigCountText">New signals available</p>
+        <button onclick="window.location.reload()"
+                class="text-xs font-bold text-black px-3 py-1 rounded-lg shrink-0"
+                style="background:linear-gradient(135deg,#D4AF37,#FFD700);">
+            <i class="fas fa-rotate-right mr-1"></i> Refresh
+        </button>
+    </div>
+</div>
+
 <p class="text-xs text-gray-600 mb-4">
     Showing <span class="text-gray-400 font-semibold">{{ $signals->total() }}</span> signal{{ $signals->total() !== 1 ? 's' : '' }}
     @if(request('pair'))<span class="text-[#D4AF37]"> for "{{ request('pair') }}"</span>@endif
@@ -328,30 +344,88 @@
 let searchTimer;
 function debounceSearch(input) {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
-        document.getElementById('filterForm').submit();
-    }, 500);
+    searchTimer = setTimeout(() => { document.getElementById('filterForm').submit(); }, 500);
 }
 
-// ── Signal countdown timers ──
+// ── Signal countdown timers (fixed: clear interval on expiry, guard double-removal) ──
 document.querySelectorAll('.countdown[data-expires]').forEach(el => {
     const expiresAt = parseInt(el.dataset.expires) * 1000;
+    let timerId;
     function tick() {
         const diff = expiresAt - Date.now();
-        if (diff <= 0) { el.textContent = 'Window closed'; el.style.color = '#6b7280'; return; }
+        if (diff <= 0) {
+            clearInterval(timerId);
+            el.textContent = 'Window closed';
+            el.style.color = '#6b7280';
+            const card = el.closest('[data-signal-id]');
+            if (card && !card.dataset.removing) {
+                card.dataset.removing = '1';
+                setTimeout(() => {
+                    if (!document.contains(card)) return;
+                    card.style.transition = 'opacity 0.5s, transform 0.5s';
+                    card.style.opacity    = '0';
+                    card.style.transform  = 'scale(0.9)';
+                    setTimeout(() => { if (document.contains(card)) card.remove(); }, 520);
+                }, 1500);
+            }
+            return;
+        }
         const s = Math.floor(diff / 1000);
-        const d = Math.floor(s / 86400);
-        const h = Math.floor((s % 86400) / 3600);
-        const m = Math.floor((s % 3600) / 60);
-        const sec = s % 60;
-        if (d > 0)      el.textContent = `${d}d ${h}h left`;
-        else if (h > 0) el.textContent = `${h}h ${m}m left`;
-        else if (m > 0) el.textContent = `${m}m ${sec}s left`;
-        else            el.textContent = `${sec}s left`;
+        const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600),
+              m = Math.floor((s % 3600) / 60), sec = s % 60;
+        el.textContent = d > 0 ? `${d}d ${h}h left` : h > 0 ? `${h}h ${m}m left`
+                       : m > 0 ? `${m}m ${sec}s left` : `${sec}s left`;
         el.style.color = s < 300 ? '#ef4444' : s < 3600 ? '#eab308' : '#22c55e';
     }
-    tick(); setInterval(tick, 1000);
+    tick();
+    timerId = setInterval(tick, 1000);
 });
+
+// ── Smart live polling (signals page — only active filter) ──
+const knownSigIds = new Set([{{ $signals->pluck('id')->implode(',') }}]);
+
+async function pollSignalsPage() {
+    try {
+        const statusFilter = document.getElementById('f_status')?.value || 'active';
+        if (statusFilter !== 'active') return; // only auto-remove on active tab
+        const res = await fetch('{{ route("signals.live") }}', {
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const serverIds = new Set(data.active_ids || []);
+        let newCount = 0;
+
+        [...knownSigIds].forEach(id => {
+            if (!serverIds.has(id)) {
+                const card = document.querySelector(`[data-signal-id="${id}"]`);
+                if (card && !card.dataset.removing) {
+                    card.dataset.removing = '1';
+                    card.style.transition = 'opacity 0.5s, transform 0.5s';
+                    card.style.opacity    = '0';
+                    card.style.transform  = 'scale(0.92)';
+                    setTimeout(() => { if (document.contains(card)) card.remove(); }, 520);
+                }
+                knownSigIds.delete(id);
+            }
+        });
+        serverIds.forEach(id => { if (!knownSigIds.has(id)) { newCount++; knownSigIds.add(id); } });
+
+        if (newCount > 0) {
+            const b = document.getElementById('newSigBanner');
+            if (b) {
+                document.getElementById('newSigCountText').textContent =
+                    `${newCount} new signal${newCount > 1 ? 's' : ''} — click Refresh to see`;
+                b.classList.remove('opacity-0', 'pointer-events-none');
+                b.classList.add('opacity-100');
+            }
+        }
+    } catch(e) { /* silent */ }
+}
+
+// Poll immediately (1s after load), then every 15s
+setTimeout(pollSignalsPage, 1000);
+setInterval(pollSignalsPage, 15000);
 
 const timeframeColors = {
     scalp:'bg-purple-500', short:'bg-blue-500', intraday:'bg-cyan-500',
