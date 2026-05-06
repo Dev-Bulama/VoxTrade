@@ -35,17 +35,23 @@
             <h1 class="text-3xl md:text-4xl font-bold text-white mb-3">{{ $settings['pricing_title'] ?? 'Simple, Transparent Pricing' }}</h1>
             <p class="text-gray-400">Access AI-powered trade signals at any budget</p>
         </div>
+        @php
+            $pDaily   = (int) ($settings['price_daily']   ?? 500);
+            $pWeekly  = (int) ($settings['price_weekly']  ?? 2000);
+            $pMonthly = (int) ($settings['price_monthly'] ?? 5000);
+            $pricingPlans = [
+                ['name'=>'Daily',   'price'=> $pDaily,   'period'=>'/day',   'features'=>['All live signals','AI analysis','24hr access','Basic support'],                                        'popular'=>false],
+                ['name'=>'Monthly', 'price'=> $pMonthly, 'period'=>'/month', 'features'=>['All live signals','AI analysis','30-day access','Performance analytics','Priority support','Best value'],'popular'=>true],
+                ['name'=>'Weekly',  'price'=> $pWeekly,  'period'=>'/week',  'features'=>['All live signals','AI analysis','7-day access','Performance analytics','Standard support'],              'popular'=>false],
+            ];
+        @endphp
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            @foreach([
-                ['name'=>'Daily','price'=>'₦500','period'=>'/day','features'=>['All live signals','AI analysis','24hr access','Basic support'],'popular'=>false],
-                ['name'=>'Monthly','price'=>'₦5,000','period'=>'/month','features'=>['All live signals','AI analysis','30-day access','Performance analytics','Priority support','Best value'],'popular'=>true],
-                ['name'=>'Weekly','price'=>'₦2,000','period'=>'/week','features'=>['All live signals','AI analysis','7-day access','Performance analytics','Standard support'],'popular'=>false],
-            ] as $p)
+            @foreach($pricingPlans as $p)
             <div class="{{ $p['popular'] ? 'gold-gradient p-0.5 rounded-2xl gold-glow relative' : 'glass rounded-2xl' }}">
                 @if($p['popular'])<div class="absolute -top-3 left-1/2 -translate-x-1/2 gold-gradient text-black text-xs font-bold px-4 py-1 rounded-full z-10">MOST POPULAR</div>@endif
                 <div class="{{ $p['popular'] ? 'bg-[#111] rounded-2xl' : '' }} p-6 h-full">
                     <h3 class="text-white font-bold text-xl mb-4 flex items-center gap-2"><i class="fas fa-crown text-[#D4AF37]"></i> {{ $p['name'] }}</h3>
-                    <div class="mb-6"><span class="text-4xl font-black text-white">{{ $p['price'] }}</span><span class="text-gray-400 text-sm">{{ $p['period'] }}</span></div>
+                    <div class="mb-6"><span class="text-4xl font-black text-white">₦{{ number_format($p['price']) }}</span><span class="text-gray-400 text-sm">{{ $p['period'] }}</span></div>
                     <ul class="space-y-3 mb-8">
                         @foreach($p['features'] as $f)
                         <li class="flex items-center gap-2 text-sm text-gray-300"><i class="fas fa-check text-[#D4AF37] text-xs"></i> {{ $f }}</li>
