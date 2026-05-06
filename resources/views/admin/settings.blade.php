@@ -76,6 +76,47 @@
             </div>
         </div>
 
+        {{-- Plan Prices --}}
+        <div class="glass rounded-2xl p-6">
+            <div class="flex items-start gap-4">
+                <div class="w-10 h-10 rounded-xl bg-[#D4AF37]/10 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-tags text-[#D4AF37]"></i>
+                </div>
+                <div class="flex-1">
+                    <label class="block text-white font-semibold mb-1">Subscription Plan Prices</label>
+                    <p class="text-gray-500 text-xs mb-4">Set the price for each plan in Nigerian Naira (NGN). Paystack will charge users in kobo automatically (×100).</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        @foreach([
+                            ['key' => 'price_daily',   'label' => 'Daily',   'icon' => 'sun',        'default' => 500,  'color' => 'blue'],
+                            ['key' => 'price_weekly',  'label' => 'Weekly',  'icon' => 'calendar-week','default' => 2000, 'color' => 'purple'],
+                            ['key' => 'price_monthly', 'label' => 'Monthly', 'icon' => 'crown',       'default' => 5000, 'color' => 'yellow'],
+                        ] as $plan)
+                        <div class="bg-[#111]/60 rounded-xl p-4 border border-[#2a2a2a]">
+                            <div class="flex items-center gap-2 mb-3">
+                                <i class="fas fa-{{ $plan['icon'] }} text-{{ $plan['color'] }}-400 text-sm"></i>
+                                <span class="text-sm font-semibold text-white">{{ $plan['label'] }}</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-gray-500 text-sm font-bold">₦</span>
+                                <input type="number" name="{{ $plan['key'] }}" min="100" step="50"
+                                    value="{{ $settings[$plan['key']] ?? $plan['default'] }}"
+                                    class="flex-1 bg-[#0a0a0a] border border-[#D4AF37]/20 text-white rounded-xl px-3 py-2.5 text-sm font-bold focus:outline-none focus:border-[#D4AF37]/50 text-center">
+                            </div>
+                            <p class="text-[10px] text-gray-600 mt-2 text-center">
+                                = ₦{{ number_format($settings[$plan['key']] ?? $plan['default']) }} / {{ strtolower($plan['label']) }}
+                            </p>
+                            @error($plan['key'])<p class="text-red-400 text-xs mt-1">{{ $message }}</p>@enderror
+                        </div>
+                        @endforeach
+                    </div>
+                    <p class="text-gray-600 text-xs mt-3">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Changes take effect immediately for new subscriptions. Existing active subscriptions are not affected.
+                    </p>
+                </div>
+            </div>
+        </div>
+
         <button type="submit" class="px-6 py-3 rounded-xl font-bold text-sm text-black transition hover:opacity-90" style="background:linear-gradient(135deg,#D4AF37,#FFD700)">
             <i class="fas fa-save mr-2"></i> Save Settings
         </button>
