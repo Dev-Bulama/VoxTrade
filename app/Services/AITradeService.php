@@ -81,50 +81,58 @@ class AITradeService
      */
     public function fetchForexData(string $fromCurrency, string $toCurrency): ?array
     {
-        // Build Yahoo Finance symbol; gold/silver use futures codes
         $from = strtoupper($fromCurrency);
         $to   = strtoupper($toCurrency);
         $sym  = match(true) {
-            $from === 'XAU' => 'GC=F',   // Gold futures
-            $from === 'XAG' => 'SI=F',   // Silver futures
-            $from === 'OIL' => 'CL=F',   // Crude oil futures
+            $from === 'XAU' => 'GC=F',
+            $from === 'XAG' => 'SI=F',
+            $from === 'OIL' => 'CL=F',
             default         => "{$from}{$to}=X",
         };
 
-        try {
-            $response = Http::withHeaders([
-                'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept'     => 'application/json',
-            ])->timeout(15)->get("https://query1.finance.yahoo.com/v8/finance/chart/{$sym}", [
-                'interval' => '1h',
-                'range'    => '2d',
-            ]);
+        // Try query1 then query2 as fallback — Yahoo sometimes rotates which host responds
+        $hosts = ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'];
 
-            if (!$response->successful()) {
-                Log::warning("Yahoo Finance failed for {$sym}", ['status' => $response->status()]);
-                return null;
+        foreach ($hosts as $host) {
+            try {
+                $response = Http::withHeaders([
+                    'User-Agent'      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept'          => 'application/json,text/plain,*/*',
+                    'Accept-Language' => 'en-US,en;q=0.9',
+                    'Referer'         => 'https://finance.yahoo.com/',
+                ])->timeout(15)->get("{$host}/v8/finance/chart/{$sym}", [
+                    'interval' => '1h',
+                    'range'    => '2d',
+                ]);
+
+                if (!$response->successful()) {
+                    Log::warning("Yahoo Finance {$host} failed for {$sym}", ['status' => $response->status()]);
+                    continue;
+                }
+
+                $chartData = $response->json('chart.result.0');
+                if (!$chartData) continue;
+
+                $closes = array_values(array_filter(
+                    $chartData['indicators']['quote'][0]['close'] ?? [],
+                    fn($v) => $v !== null
+                ));
+
+                if (empty($closes)) continue;
+
+                return [
+                    'symbol'        => "{$from}{$to}",
+                    'prices'        => $closes,
+                    'current_price' => end($closes),
+                    'volume'        => null,
+                ];
+            } catch (\Throwable $e) {
+                Log::warning("Yahoo Finance exception for {$sym} on {$host}: " . $e->getMessage());
             }
-
-            $chartData = $response->json('chart.result.0');
-            if (!$chartData) return null;
-
-            $closes = array_values(array_filter(
-                $chartData['indicators']['quote'][0]['close'] ?? [],
-                fn($v) => $v !== null
-            ));
-
-            if (empty($closes)) return null;
-
-            return [
-                'symbol'        => "{$from}{$to}",
-                'prices'        => $closes,
-                'current_price' => end($closes),
-                'volume'        => null,
-            ];
-        } catch (\Throwable $e) {
-            Log::error("Exception fetching Yahoo Finance {$sym}: " . $e->getMessage());
-            return null;
         }
+
+        Log::error("fetchForexData: all Yahoo Finance endpoints failed for {$sym}");
+        return null;
     }
 
     /**
@@ -694,8 +702,8 @@ PROMPT;
             return null;
         }
 
-        if ((int) $signal['confidence'] < 70) {
-            Log::info("Signal confidence too low for {$displayPair}: {$signal['confidence']}");
+        if ((int) $signal['confidence'] < (int) Setting::get('ai_sensitivity', 70)) {
+            Log::info("Signal rejected for {$displayPair}: confidence {$signal['confidence']}% below threshold " . Setting::get('ai_sensitivity', 70) . "%");
             return null;
         }
 

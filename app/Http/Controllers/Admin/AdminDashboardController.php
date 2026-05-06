@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\ApiKey;
 use App\Models\Trade;
 use App\Models\User;
 use App\Models\Payment;
+use App\Models\Setting;
 use App\Models\Subscription;
 
 class AdminDashboardController extends Controller
@@ -23,7 +25,17 @@ class AdminDashboardController extends Controller
         $recentUsers    = User::where('role', 'trader')->latest()->limit(5)->get();
         $recentTrades   = Trade::latest()->limit(5)->get();
         $recentPayments = Payment::with('user')->latest()->limit(5)->get();
-        return view('admin.dashboard', compact('stats', 'recentUsers', 'recentTrades', 'recentPayments'));
+
+        // System health checks for admin visibility
+        $health = [
+            'openai_key'    => !empty(ApiKey::getApiKey('openai'))   || !empty(config('services.openai.key')),
+            'paystack_key'  => !empty(ApiKey::getApiKey('paystack')) || !empty(config('services.paystack.secret_key')),
+            'ai_sensitivity'=> (int) Setting::get('ai_sensitivity', 70),
+            'active_signals'=> Trade::where('status', 'active')->count(),
+            'last_signal_at'=> Trade::latest()->value('created_at'),
+        ];
+
+        return view('admin.dashboard', compact('stats', 'recentUsers', 'recentTrades', 'recentPayments', 'health'));
     }
 
     public function guide()
