@@ -441,7 +441,7 @@ PROMPT;
     /**
      * Expire all active signals whose duration window has passed.
      */
-    private function expireStaleSignals(): void
+    public function expireStaleSignals(): void
     {
         $active = Trade::where('status', 'active')->get(['id', 'duration', 'created_at']);
         $expiredIds = [];
@@ -456,6 +456,125 @@ PROMPT;
             Log::info('AITradeService: duration-expired ' . count($expiredIds) . ' signal(s).');
         }
     }
+
+    /**
+     * Validate all active signals against live market prices.
+     * Batch-fetches crypto prices in one API call. Marks tp_hit / sl_hit where price has crossed levels.
+     */
+    public function validateAndCloseSignals(): void
+    {
+        // Step 1: expire by duration (no API calls)
+        $this->expireStaleSignals();
+
+        $active = Trade::where('status', 'active')->get();
+        if ($active->isEmpty()) return;
+
+        // Build pair → config map for watched pairs
+        $pairMap = [];
+        foreach (self::watchedPairs() as $p) {
+            $pairMap[$p['display']] = $p;
+        }
+
+        // ── Crypto: one batch call to CoinGecko simple/price ──
+        $cryptoSignals   = $active->where('category', 'crypto');
+        $cryptoPrices    = [];
+
+        if ($cryptoSignals->isNotEmpty()) {
+            $pairToCoin = [];
+            foreach ($cryptoSignals->pluck('pair')->unique() as $pair) {
+                $p = $pairMap[$pair] ?? null;
+                if ($p && isset($this->coinGeckoMap[$p['symbol'] ?? ''])) {
+                    $pairToCoin[$pair] = $this->coinGeckoMap[$p['symbol']];
+                }
+            }
+            if (!empty($pairToCoin)) {
+                $batch = $this->fetchCryptoPricesBatch(array_values($pairToCoin));
+                foreach ($pairToCoin as $pair => $coinId) {
+                    if (isset($batch[$coinId])) {
+                        $cryptoPrices[$pair] = $batch[$coinId];
+                    }
+                }
+            }
+        }
+
+        // ── Forex/commodity: individual Yahoo Finance calls ──
+        $forexPrices  = [];
+        $forexSignals = $active->where('category', 'forex');
+        foreach ($forexSignals->pluck('pair')->unique() as $pair) {
+            $p = $pairMap[$pair] ?? null;
+            if ($p && $p['type'] === 'forex') {
+                try {
+                    $data = $this->fetchForexData($p['from'], $p['to']);
+                    if ($data) $forexPrices[$pair] = (float) $data['current_price'];
+                } catch (\Throwable) {}
+            }
+        }
+
+        $allPrices = array_merge($cryptoPrices, $forexPrices);
+        $hitCount  = 0;
+
+        foreach ($active as $trade) {
+            $price = $allPrices[$trade->pair] ?? null;
+            if ($price !== null && $this->checkSignalAgainstMarket($trade, $price)) {
+                $hitCount++;
+            }
+        }
+
+        if ($hitCount > 0) {
+            Log::info("AITradeService::validateAndCloseSignals: {$hitCount} SL/TP hit(s) recorded.");
+        }
+    }
+
+    /**
+     * Batch-fetch current USD prices for multiple CoinGecko coin IDs in one HTTP call.
+     * Returns ['bitcoin' => 65000.0, 'ethereum' => 3200.0, ...]
+     */
+    private function fetchCryptoPricesBatch(array $coinIds): array
+    {
+        if (empty($coinIds)) return [];
+        try {
+            $res = Http::withHeaders(['Accept' => 'application/json'])
+                ->timeout(10)
+                ->get('https://api.coingecko.com/api/v3/simple/price', [
+                    'ids'           => implode(',', array_unique($coinIds)),
+                    'vs_currencies' => 'usd',
+                ]);
+            if (!$res->successful()) return [];
+            return array_map(fn($v) => (float) ($v['usd'] ?? 0), $res->json() ?? []);
+        } catch (\Throwable $e) {
+            Log::warning('CoinGecko batch price fetch failed: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Check a single active signal against the given live price.
+     * Updates status to tp_hit or sl_hit if the level was crossed. Returns true if status changed.
+     */
+    private function checkSignalAgainstMarket(Trade $trade, float $currentPrice): bool
+    {
+        $sl   = (float) $trade->stop_loss;
+        $tp   = (float) $trade->take_profit;
+        $type = strtoupper($trade->type);
+
+        $hit = null;
+        if ($type === 'BUY') {
+            if ($currentPrice <= $sl) $hit = 'sl_hit';
+            elseif ($currentPrice >= $tp) $hit = 'tp_hit';
+        } else {
+            if ($currentPrice >= $sl) $hit = 'sl_hit';
+            elseif ($currentPrice <= $tp) $hit = 'tp_hit';
+        }
+
+        if ($hit) {
+            $trade->update(['status' => $hit]);
+            Log::info("Trade {$trade->id} ({$trade->pair} {$type}): {$hit} at live price {$currentPrice}");
+            return true;
+        }
+
+        return false;
+    }
+
     public static function watchedPairs(): array
     {
         return [

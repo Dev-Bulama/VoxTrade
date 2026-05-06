@@ -196,11 +196,16 @@
         <h2 class="text-3xl md:text-4xl font-bold text-white">{{ $settings['pricing_title'] ?? 'Simple, Transparent Pricing' }}</h2>
         <p class="text-gray-400 mt-3">No hidden fees. Cancel anytime.</p>
     </div>
+    @php
+        $pD = (int) ($settings['price_daily']   ?? 500);
+        $pW = (int) ($settings['price_weekly']  ?? 2000);
+        $pM = (int) ($settings['price_monthly'] ?? 5000);
+    @endphp
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         @foreach([
-            ['name'=>'Daily','price'=>'₦500','period'=>'/day','features'=>['All live signals','AI analysis','24hr access','Basic support'],'popular'=>false,'plan'=>'daily'],
-            ['name'=>'Monthly','price'=>'₦5,000','period'=>'/month','features'=>['All live signals','AI analysis','30-day access','Performance analytics','Priority support','Best value'],'popular'=>true,'plan'=>'monthly'],
-            ['name'=>'Weekly','price'=>'₦2,000','period'=>'/week','features'=>['All live signals','AI analysis','7-day access','Performance analytics','Standard support'],'popular'=>false,'plan'=>'weekly'],
+            ['name'=>'Daily',   'price'=>'₦'.number_format($pD), 'period'=>'/day',   'features'=>['All live signals','AI analysis','24hr access','Basic support'],                                        'popular'=>false,'plan'=>'daily'],
+            ['name'=>'Monthly', 'price'=>'₦'.number_format($pM), 'period'=>'/month', 'features'=>['All live signals','AI analysis','30-day access','Performance analytics','Priority support','Best value'],'popular'=>true, 'plan'=>'monthly'],
+            ['name'=>'Weekly',  'price'=>'₦'.number_format($pW), 'period'=>'/week',  'features'=>['All live signals','AI analysis','7-day access','Performance analytics','Standard support'],              'popular'=>false,'plan'=>'weekly'],
         ] as $p)
         <div class="rounded-2xl p-6 relative {{ $p['popular'] ? 'gold-gradient p-0.5 gold-glow' : 'glass' }}">
             @if($p['popular'])

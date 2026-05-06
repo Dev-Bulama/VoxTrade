@@ -9,5 +9,8 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-// Run every minute; job skips pairs that still have unexpired active signals
+// Generate new signals every minute (skips pairs with unexpired active signal)
 Schedule::job(new AnalyzeMarketJob)->everyMinute();
+
+// Validate active signals against live prices every 2 minutes (expire stale + detect TP/SL hits)
+Schedule::command('signals:validate')->everyTwoMinutes();

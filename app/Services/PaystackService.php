@@ -2,11 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\ApiKey;
 use App\Models\Payment;
 use App\Models\Setting;
 use App\Models\Subscription;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class PaystackService
 {
@@ -15,11 +17,19 @@ class PaystackService
 
     public function __construct()
     {
-        $this->secretKey = (string) config('services.paystack.secret_key', '');
+        // Prefer key saved via Admin → API Keys panel (encrypted in DB),
+        // fall back to PAYSTACK_SECRET_KEY in .env
+        $dbKey = ApiKey::getApiKey('paystack');
+        $this->secretKey = (string) ($dbKey ?: config('services.paystack.secret_key', ''));
     }
 
     public function initializeTransaction(User $user, float $amount, string $reference, array $metadata = []): ?array
     {
+        if (empty($this->secretKey)) {
+            Log::error('PaystackService: secret key is not configured. Add it via Admin → API Keys (service: paystack) or set PAYSTACK_SECRET_KEY in .env');
+            return null;
+        }
+
         $response = Http::withToken($this->secretKey)
             ->post("{$this->baseUrl}/transaction/initialize", [
                 'email'     => $user->email,
@@ -29,6 +39,10 @@ class PaystackService
             ]);
 
         if (!$response->successful() || !$response->json('status')) {
+            Log::warning('PaystackService: initializeTransaction failed', [
+                'status' => $response->status(),
+                'body'   => $response->body(),
+            ]);
             return null;
         }
 
