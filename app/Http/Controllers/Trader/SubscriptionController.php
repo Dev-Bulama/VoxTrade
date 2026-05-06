@@ -17,10 +17,11 @@ class SubscriptionController extends Controller
     {
         $user = auth()->user();
         $subscription = $user->subscription;
+        $prices = PaystackService::planPricesNGN();
         $plans = [
-            'daily'   => ['name' => 'Daily',   'price' => 500,  'features' => ['All live signals', 'AI analysis', '24hr access']],
-            'weekly'  => ['name' => 'Weekly',  'price' => 2000, 'features' => ['All live signals', 'AI analysis', '7-day access', 'Performance analytics']],
-            'monthly' => ['name' => 'Monthly', 'price' => 5000, 'features' => ['All live signals', 'AI analysis', '30-day access', 'Performance analytics', 'Priority support']],
+            'daily'   => ['name' => 'Daily',   'price' => $prices['daily'],   'features' => ['All live signals', 'AI analysis', '24hr access']],
+            'weekly'  => ['name' => 'Weekly',  'price' => $prices['weekly'],  'features' => ['All live signals', 'AI analysis', '7-day access', 'Performance analytics']],
+            'monthly' => ['name' => 'Monthly', 'price' => $prices['monthly'], 'features' => ['All live signals', 'AI analysis', '30-day access', 'Performance analytics', 'Priority support']],
         ];
         return view('trader.subscription', compact('plans', 'subscription'));
     }

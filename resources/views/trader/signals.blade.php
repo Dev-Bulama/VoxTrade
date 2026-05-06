@@ -65,13 +65,39 @@
                     data-group="status" data-value="{{ $val }}">{{ $label }}</button>
                 @endforeach
             </div>
+
+            {{-- Timeframe --}}
+            <div class="flex items-center gap-1 bg-[#141414] border border-[#1e1e1e] rounded-full px-1 py-1">
+                @foreach([
+                    'all'      => '⏱ All',
+                    'scalp'    => '⚡ Scalp',
+                    'short'    => '🔵 Short',
+                    'intraday' => '🟡 Intraday',
+                    'day'      => '🟠 Day',
+                    'swing'    => '🔴 Swing',
+                ] as $val => $label)
+                <button type="button"
+                    onclick="setFilter('timeframe','{{ $val }}')"
+                    class="filter-chip px-3 py-1 rounded-full text-xs font-semibold transition
+                        {{ (request('timeframe','all')===$val)
+                            ? ($val==='scalp' ? 'bg-purple-500 text-white'
+                                : ($val==='short'    ? 'bg-blue-500 text-white'
+                                : ($val==='intraday' ? 'bg-cyan-500 text-white'
+                                : ($val==='day'      ? 'bg-orange-500 text-white'
+                                : ($val==='swing'    ? 'bg-yellow-500 text-black'
+                                : 'bg-[#D4AF37] text-black')))))
+                            : 'text-gray-400 hover:text-white' }}"
+                    data-group="timeframe" data-value="{{ $val }}">{{ $label }}</button>
+                @endforeach
+            </div>
         </div>
     </div>
 
-    <input type="hidden" name="category" id="f_category" value="{{ request('category','all') }}">
-    <input type="hidden" name="type"     id="f_type"     value="{{ request('type','all') }}">
-    <input type="hidden" name="risk"     id="f_risk"     value="{{ request('risk','all') }}">
-    <input type="hidden" name="status"   id="f_status"   value="{{ request('status','active') }}">
+    <input type="hidden" name="category"  id="f_category"  value="{{ request('category','all') }}">
+    <input type="hidden" name="type"      id="f_type"      value="{{ request('type','all') }}">
+    <input type="hidden" name="risk"      id="f_risk"      value="{{ request('risk','all') }}">
+    <input type="hidden" name="status"    id="f_status"    value="{{ request('status','active') }}">
+    <input type="hidden" name="timeframe" id="f_timeframe" value="{{ request('timeframe','all') }}">
 
     {{-- ── Pair Search ── --}}
     <div class="relative mb-1">
@@ -327,15 +353,29 @@ document.querySelectorAll('.countdown[data-expires]').forEach(el => {
     tick(); setInterval(tick, 1000);
 });
 
+const timeframeColors = {
+    scalp:'bg-purple-500', short:'bg-blue-500', intraday:'bg-cyan-500',
+    day:'bg-orange-500',   swing:'bg-yellow-500'
+};
+const timeframeText = { swing:'text-black' };
+
 function setFilter(group, value) {
     document.getElementById('f_' + group).value = value;
     document.querySelectorAll('[data-group="' + group + '"]').forEach(btn => {
         const isActive = btn.dataset.value === value;
-        btn.classList.remove('bg-[#D4AF37]','text-black','bg-green-500','bg-red-500','text-white','text-gray-400','hover:text-white');
+        btn.classList.remove(
+            'bg-[#D4AF37]','bg-green-500','bg-red-500','bg-purple-500','bg-blue-500',
+            'bg-cyan-500','bg-orange-500','bg-yellow-500',
+            'text-black','text-white','text-gray-400','hover:text-white'
+        );
         if (isActive) {
-            if (group === 'type' && value === 'buy')       btn.classList.add('bg-green-500','text-white');
-            else if (group === 'type' && value === 'sell') btn.classList.add('bg-red-500','text-white');
-            else                                            btn.classList.add('bg-[#D4AF37]','text-black');
+            if (group === 'type' && value === 'buy')        btn.classList.add('bg-green-500','text-white');
+            else if (group === 'type' && value === 'sell')  btn.classList.add('bg-red-500','text-white');
+            else if (group === 'timeframe' && timeframeColors[value]) {
+                btn.classList.add(timeframeColors[value], timeframeText[value] ?? 'text-white');
+            } else {
+                btn.classList.add('bg-[#D4AF37]','text-black');
+            }
         } else {
             btn.classList.add('text-gray-400','hover:text-white');
         }
