@@ -48,7 +48,10 @@ class DatabaseSeeder extends Seeder
             ['key' => 'disclaimer',         'value' => 'This platform provides AI-assisted trade insights. Not financial advice. Trading involves risk.',                         'type' => 'textarea'],
             ['key' => 'refresh_interval',   'value' => '5',                                                                                                                       'type' => 'number'],
             ['key' => 'default_risk_level', 'value' => 'medium',                                                                                                                  'type' => 'text'],
-            ['key' => 'ai_sensitivity',     'value' => '70',                                                                                                                      'type' => 'number'],
+            ['key' => 'ai_sensitivity', 'value' => '70', 'type' => 'number'],
+            ['key' => 'price_daily',     'value' => '500',  'type' => 'number'],
+            ['key' => 'price_weekly',    'value' => '2000', 'type' => 'number'],
+            ['key' => 'price_monthly',   'value' => '5000', 'type' => 'number'],
         ];
 
         foreach ($settings as $setting) {

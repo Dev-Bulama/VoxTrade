@@ -296,24 +296,31 @@ Signal Timeframe — choose ONE based on how strong the setup is:
 • SWING  → "3 days" | "5 days"
   (major level break or sustained trend, weekly alignment)
 
+CRITICAL ENTRY RULE:
+The entry price is ALWAYS the current live market price: {$currentPrice}
+You MUST set "entry" to exactly {$currentPrice} — no adjustments, no limit-order levels.
+Calculate stop_loss and take_profit as distances FROM {$currentPrice}.
+
 Rules:
 1. Only issue a signal when you are genuinely confident (≥70%).
-2. Stop loss MUST be at a meaningful technical level (support/resistance, not arbitrary %).
-3. Risk:reward MUST be at least 1:1.5 (take profit ≥ 1.5× the stop distance).
-4. Shorter durations require higher certainty — scalp signals need RSI extremes + volume.
-5. If conditions are mixed or unclear, set confidence below 70 — the system will reject it.
+2. For a BUY: stop_loss MUST be below {$currentPrice}, take_profit MUST be above {$currentPrice}.
+3. For a SELL: stop_loss MUST be above {$currentPrice}, take_profit MUST be below {$currentPrice}.
+4. Risk:reward MUST be at least 1:1.5 (distance to TP ≥ 1.5× distance to SL).
+5. Place SL at a meaningful technical level near {$currentPrice}, not more than 3% away.
+6. Shorter durations require higher certainty — scalp signals need RSI extremes + volume.
+7. If conditions are mixed, set confidence below 70 — the system will reject it.
 
 Respond ONLY with a valid JSON object, no markdown, no extra text:
 {
   "pair": "{$displayPair}",
   "type": "BUY or SELL",
-  "entry": <number>,
-  "stop_loss": <number>,
-  "take_profit": <number>,
+  "entry": {$currentPrice},
+  "stop_loss": <number — must be on the correct side of {$currentPrice}>,
+  "take_profit": <number — must be on the correct side of {$currentPrice}>,
   "confidence": <integer 0-100>,
   "duration": "<exact string from the list above, e.g. '5 minutes' or '4 hours' or '2 days'>",
   "risk_level": "<low | medium | high>",
-  "analysis_summary": "<2-3 sentences: what the indicators say and why price will move this direction>"
+  "analysis_summary": "<2-3 sentences: what the indicators say and why price will move in this direction>"
 }
 PROMPT;
     }
@@ -573,10 +580,30 @@ PROMPT;
             return null;
         }
 
+        // ALWAYS anchor entry to the live market price fetched earlier.
+        // AI-suggested entries are ignored because they drift from real-time price.
+        $liveEntry = (float) $marketData['current_price'];
+
+        // Sanity-check SL and TP are on correct side of live entry;
+        // if AI returned nonsense levels, skip this signal.
+        $slOk = strtoupper($signal['type']) === 'BUY'
+            ? (float) $signal['stop_loss']    < $liveEntry
+            : (float) $signal['stop_loss']    > $liveEntry;
+        $tpOk = strtoupper($signal['type']) === 'BUY'
+            ? (float) $signal['take_profit']  > $liveEntry
+            : (float) $signal['take_profit']  < $liveEntry;
+
+        if (!$slOk || !$tpOk) {
+            Log::warning("AITradeService: {$displayPair} signal rejected — SL/TP inverted after anchoring to live price {$liveEntry}.", [
+                'type' => $signal['type'], 'sl' => $signal['stop_loss'], 'tp' => $signal['take_profit'],
+            ]);
+            return null;
+        }
+
         $trade = Trade::create([
             'pair'             => $displayPair,
             'type'             => strtoupper($signal['type']),
-            'entry_price'      => $signal['entry'],
+            'entry_price'      => $liveEntry,
             'stop_loss'        => $signal['stop_loss'],
             'take_profit'      => $signal['take_profit'],
             'confidence'       => min(100, (int) $signal['confidence']),

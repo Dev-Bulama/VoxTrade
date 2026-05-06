@@ -130,7 +130,7 @@
     @endif
 
     <!-- ── Main Content ── -->
-    <main class="max-w-2xl mx-auto px-4 py-5">
+    <main class="max-w-6xl mx-auto px-4 py-5">
         @yield('content')
     </main>
 

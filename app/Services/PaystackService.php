@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Payment;
+use App\Models\Setting;
 use App\Models\Subscription;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
@@ -17,16 +18,12 @@ class PaystackService
         $this->secretKey = (string) config('services.paystack.secret_key', '');
     }
 
-    /**
-     * Initialize a Paystack transaction.
-     * Returns an array with authorization_url and reference, or null on failure.
-     */
     public function initializeTransaction(User $user, float $amount, string $reference, array $metadata = []): ?array
     {
         $response = Http::withToken($this->secretKey)
             ->post("{$this->baseUrl}/transaction/initialize", [
                 'email'     => $user->email,
-                'amount'    => (int) $amount, // amount in kobo
+                'amount'    => (int) $amount,
                 'reference' => $reference,
                 'metadata'  => $metadata,
             ]);
@@ -44,10 +41,6 @@ class PaystackService
         ];
     }
 
-    /**
-     * Verify a Paystack transaction by its reference.
-     * Returns transaction data array or null on failure.
-     */
     public function verifyTransaction(string $reference): ?array
     {
         $response = Http::withToken($this->secretKey)
@@ -61,18 +54,28 @@ class PaystackService
     }
 
     /**
-     * Get the plan price in kobo (NGN).
-     * daily  = 500 NGN  = 50,000 kobo
-     * weekly = 2,000 NGN = 200,000 kobo
-     * monthly = 5,000 NGN = 500,000 kobo
+     * Get plan price in kobo (NGN). Reads from DB settings, falls back to defaults.
+     * Admin can override via Settings page.
      */
     public function getPlanPrice(string $plan): int
     {
-        return match (strtolower($plan)) {
-            'daily'   => 50000,
-            'weekly'  => 200000,
-            'monthly' => 500000,
-            default   => 0,
-        };
+        $defaults = ['daily' => 500, 'weekly' => 2000, 'monthly' => 5000];
+        $plan     = strtolower($plan);
+        if (!isset($defaults[$plan])) return 0;
+
+        $ngnPrice = (int) Setting::get("price_{$plan}", $defaults[$plan]);
+        return $ngnPrice * 100; // convert NGN to kobo
+    }
+
+    /**
+     * Get all plan prices in NGN (for display).
+     */
+    public static function planPricesNGN(): array
+    {
+        return [
+            'daily'   => (int) Setting::get('price_daily',   500),
+            'weekly'  => (int) Setting::get('price_weekly',  2000),
+            'monthly' => (int) Setting::get('price_monthly', 5000),
+        ];
     }
 }

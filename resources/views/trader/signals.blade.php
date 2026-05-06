@@ -72,10 +72,26 @@
     <input type="hidden" name="type"     id="f_type"     value="{{ request('type','all') }}">
     <input type="hidden" name="risk"     id="f_risk"     value="{{ request('risk','all') }}">
     <input type="hidden" name="status"   id="f_status"   value="{{ request('status','active') }}">
+
+    {{-- ── Pair Search ── --}}
+    <div class="relative mb-1">
+        <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 text-sm pointer-events-none"></i>
+        <input type="text" name="pair" value="{{ request('pair') }}"
+               placeholder="Search pair… e.g. BTC, EUR/USD, XAU"
+               class="w-full bg-[#141414] border border-[#2a2a2a] text-white rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:border-[#D4AF37]/50 placeholder-gray-600"
+               oninput="debounceSearch(this)">
+        @if(request('pair'))
+        <a href="{{ request()->fullUrlWithQuery(['pair' => null]) }}"
+           class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition text-xs">
+            <i class="fas fa-times"></i>
+        </a>
+        @endif
+    </div>
 </form>
 
 <p class="text-xs text-gray-600 mb-4">
     Showing <span class="text-gray-400 font-semibold">{{ $signals->total() }}</span> signal{{ $signals->total() !== 1 ? 's' : '' }}
+    @if(request('pair'))<span class="text-[#D4AF37]"> for "{{ request('pair') }}"</span>@endif
 </p>
 
 {{-- ── Signals Grid: 1 col mobile → 2 col tablet → 3 col desktop ── --}}
@@ -282,6 +298,15 @@
 
 @push('scripts')
 <script>
+// ── Pair search debounce ──
+let searchTimer;
+function debounceSearch(input) {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+        document.getElementById('filterForm').submit();
+    }, 500);
+}
+
 // ── Signal countdown timers ──
 document.querySelectorAll('.countdown[data-expires]').forEach(el => {
     const expiresAt = parseInt(el.dataset.expires) * 1000;

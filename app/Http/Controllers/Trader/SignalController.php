@@ -15,13 +15,15 @@ class SignalController extends Controller
         $type     = $request->input('type', 'all');
         $risk     = $request->input('risk', 'all');
         $status   = $request->input('status', 'active');
+        $pair     = trim($request->input('pair', ''));
 
         if ($category && $category !== 'all') $query->where('category', $category);
         if ($type     && $type     !== 'all') $query->where('type', strtoupper($type));
         if ($risk     && $risk     !== 'all') $query->where('risk_level', $risk);
         if ($status   && $status   !== 'all') $query->where('status', $status);
+        if ($pair !== '')                      $query->where('pair', 'like', '%' . $pair . '%');
 
-        $signals = $query->paginate(12);
+        $signals = $query->paginate(12)->withQueryString();
         return view('trader.signals', compact('signals'));
     }
 
