@@ -34,8 +34,8 @@
         </div>
     </div>
     <div class="text-right">
-        <p class="text-[10px] text-gray-500">Auto-refresh in</p>
-        <p class="text-sm font-black text-[#D4AF37]" id="countdown">60s</p>
+        <p class="text-[10px] text-gray-500">Last checked</p>
+        <p class="text-sm font-black text-[#D4AF37]" id="lastChecked">now</p>
     </div>
 </div>
 
@@ -43,7 +43,7 @@
 <div class="grid grid-cols-3 gap-3 mb-5">
     <div class="glass rounded-xl p-3 text-center">
         <p class="text-[9px] text-gray-500 uppercase tracking-widest mb-1">Active</p>
-        <p class="text-2xl font-black text-white">{{ $activeCount }}</p>
+        <p class="text-2xl font-black text-white" id="activeCount">{{ $activeCount }}</p>
         <p class="text-[10px] text-green-400 mt-0.5">signals</p>
     </div>
     <div class="glass rounded-xl p-3 text-center">
@@ -82,6 +82,25 @@
     <p class="text-[11px] text-gray-400 leading-relaxed">{{ $disclaimer }}</p>
 </div>
 @endif
+
+{{-- ── New Signal Banner ── --}}
+<div id="newSignalBanner"
+     class="fixed top-4 left-1/2 -translate-x-1/2 z-50 opacity-0 pointer-events-none -translate-y-3 transition-all duration-300 w-[90%] max-w-sm">
+    <div class="flex items-center gap-3 bg-[#0f1e0f]/95 border border-green-500/50 backdrop-blur-md text-white px-4 py-3 rounded-2xl shadow-xl">
+        <span class="relative flex h-2.5 w-2.5 shrink-0">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+        </span>
+        <p class="text-sm font-bold flex-1" id="newSignalCountText">New signal available</p>
+        <button onclick="window.location.reload()" class="text-xs font-bold text-black px-3 py-1 rounded-lg shrink-0"
+                style="background:linear-gradient(135deg,#D4AF37,#FFD700);">
+            <i class="fas fa-rotate-right mr-1"></i> Refresh
+        </button>
+        <button onclick="dismissBanner()" class="text-gray-400 hover:text-white ml-1 shrink-0">
+            <i class="fas fa-times text-xs"></i>
+        </button>
+    </div>
+</div>
 
 {{-- ── Active Signals Grid ── --}}
 <div class="flex items-center justify-between mb-3">
@@ -131,7 +150,7 @@
     $mt4Text = "=== VoxTrade AI Signal ===\nSymbol: {$mt4Sym}\nAction: " . strtoupper($signal->type) . "\nEntry Price: " . number_format($entry, $decimals) . "\nStop Loss: " . number_format($sl, $decimals) . "\nTake Profit: " . number_format($tp, $decimals) . "\nHold Duration: {$signal->duration}\nAI Confidence: {$signal->confidence}%\nRisk Level: " . ucfirst($signal->risk_level ?? 'medium') . "\n=========================\nExecute manually on MetaTrader 4/5";
 @endphp
 
-<div class="glass rounded-2xl p-4 border {{ $isBuy ? 'border-green-500/20' : 'border-red-500/20' }} relative overflow-hidden">
+<div data-signal-id="{{ $signal->id }}" class="glass rounded-2xl p-4 border {{ $isBuy ? 'border-green-500/20' : 'border-red-500/20' }} relative overflow-hidden">
     <div class="absolute top-0 right-0 w-20 h-20 rounded-full opacity-5 blur-2xl pointer-events-none"
          style="background:{{ $isBuy ? '#22c55e' : '#ef4444' }};"></div>
 
@@ -306,26 +325,105 @@
 // ── MT4 Copy ──
 function copyMT4(id, btn) {
     const text = btn.getAttribute('data-signal');
-    navigator.clipboard.writeText(text).then(() => {
-        const toast = document.getElementById('copyToast');
-        toast.style.opacity = '1';
-        setTimeout(() => { toast.style.opacity = '0'; }, 2500);
-        btn.innerHTML = '<i class="fas fa-check mr-1"></i> Copied!';
-        setTimeout(() => { btn.innerHTML = '<i class="fas fa-copy mr-1"></i> Copy MT4'; }, 3000);
-    }).catch(() => {
-        // Fallback for older browsers
+    const doFallback = () => {
         const ta = document.createElement('textarea');
         ta.value = text;
         document.body.appendChild(ta);
         ta.select();
         document.execCommand('copy');
         document.body.removeChild(ta);
+    };
+    const onCopied = () => {
+        const toast = document.getElementById('copyToast');
+        toast.style.opacity = '1';
+        setTimeout(() => { toast.style.opacity = '0'; }, 2500);
         btn.innerHTML = '<i class="fas fa-check mr-1"></i> Copied!';
         setTimeout(() => { btn.innerHTML = '<i class="fas fa-copy mr-1"></i> Copy MT4'; }, 3000);
-    });
+    };
+    navigator.clipboard ? navigator.clipboard.writeText(text).then(onCopied).catch(doFallback) : doFallback();
+    onCopied();
 }
 
-// ── Signal countdown timers ──
+// ── Signal card IDs known on this page ──
+const knownIds = new Set([{{ $activeSignals->pluck('id')->implode(',') }}]);
+
+function animateCardOut(card) {
+    card.style.transition = 'opacity 0.55s ease, transform 0.55s ease';
+    card.style.opacity    = '0';
+    card.style.transform  = 'scale(0.9) translateY(-6px)';
+    setTimeout(() => {
+        card.style.overflow   = 'hidden';
+        card.style.maxHeight  = card.offsetHeight + 'px';
+        requestAnimationFrame(() => {
+            card.style.transition += ', max-height 0.45s ease, margin 0.45s ease, padding 0.45s ease';
+            card.style.maxHeight  = '0';
+            card.style.margin     = '0';
+            card.style.padding    = '0';
+            setTimeout(() => card.remove(), 460);
+        });
+    }, 560);
+}
+
+function showNewSignalBanner(count) {
+    const b = document.getElementById('newSignalBanner');
+    if (!b) return;
+    document.getElementById('newSignalCountText').textContent =
+        `${count} new signal${count > 1 ? 's' : ''} available`;
+    b.classList.remove('opacity-0', 'pointer-events-none', '-translate-y-3');
+    b.classList.add('opacity-100', 'translate-y-0');
+}
+
+function dismissBanner() {
+    const b = document.getElementById('newSignalBanner');
+    b.classList.add('opacity-0', 'pointer-events-none', '-translate-y-3');
+    b.classList.remove('opacity-100', 'translate-y-0');
+}
+
+// ── Smart live polling (every 30s) ──
+let lastCheckedSecs = 0;
+setInterval(() => {
+    lastCheckedSecs++;
+    const el = document.getElementById('lastChecked');
+    if (el) el.textContent = lastCheckedSecs < 60 ? `${lastCheckedSecs}s ago` : `${Math.floor(lastCheckedSecs / 60)}m ago`;
+}, 1000);
+
+async function pollSignals() {
+    try {
+        const res = await fetch('{{ route("signals.live") }}', {
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const serverIds = new Set(data.active_ids || []);
+        let removedCount = 0, newCount = 0;
+
+        // Animate out signals no longer active
+        [...knownIds].forEach(id => {
+            if (!serverIds.has(id)) {
+                const card = document.querySelector(`[data-signal-id="${id}"]`);
+                if (card) { animateCardOut(card); removedCount++; }
+                knownIds.delete(id);
+            }
+        });
+
+        // Detect new signals
+        serverIds.forEach(id => { if (!knownIds.has(id)) { newCount++; knownIds.add(id); } });
+
+        // Update active count stat
+        const el = document.getElementById('activeCount');
+        if (el) el.textContent = data.total;
+
+        if (newCount > 0) showNewSignalBanner(newCount);
+
+        lastCheckedSecs = 0;
+        const lc = document.getElementById('lastChecked');
+        if (lc) lc.textContent = 'just now';
+    } catch(e) { /* silent */ }
+}
+
+setInterval(pollSignals, 30000);
+
+// ── Signal countdown timers (also auto-remove on expiry) ──
 document.querySelectorAll('.countdown[data-expires]').forEach(el => {
     const expiresAt = parseInt(el.dataset.expires) * 1000;
     function tick() {
@@ -333,6 +431,17 @@ document.querySelectorAll('.countdown[data-expires]').forEach(el => {
         if (diff <= 0) {
             el.textContent = 'Window closed';
             el.style.color = '#6b7280';
+            // Animate the card out immediately
+            const card = el.closest('[data-signal-id]');
+            if (card) {
+                const sigId = parseInt(card.dataset.signalId);
+                setTimeout(() => {
+                    animateCardOut(card);
+                    knownIds.delete(sigId);
+                    const countEl = document.getElementById('activeCount');
+                    if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
+                }, 2000);
+            }
             return;
         }
         const s = Math.floor(diff / 1000);
@@ -340,29 +449,14 @@ document.querySelectorAll('.countdown[data-expires]').forEach(el => {
         const h = Math.floor((s % 86400) / 3600);
         const m = Math.floor((s % 3600) / 60);
         const sec = s % 60;
-        if (d > 0)     el.textContent = `${d}d ${h}h left`;
-        else if (h > 0) el.textContent = `${h}h ${m}m left`;
-        else if (m > 0) el.textContent = `${m}m ${sec}s left`;
-        else            el.textContent = `${sec}s left`;
-        // Urgency colour
-        if (s < 300)       el.style.color = '#ef4444';   // <5 min
-        else if (s < 3600) el.style.color = '#eab308';   // <1 hr
-        else               el.style.color = '#22c55e';   // plenty of time
+        el.textContent = d > 0 ? `${d}d ${h}h left`
+                       : h > 0 ? `${h}h ${m}m left`
+                       : m > 0 ? `${m}m ${sec}s left`
+                       : `${sec}s left`;
+        el.style.color = s < 300 ? '#ef4444' : s < 3600 ? '#eab308' : '#22c55e';
     }
     tick();
     setInterval(tick, 1000);
 });
-
-// ── Page auto-refresh countdown ──
-let secs = 60;
-const el = document.getElementById('countdown');
-const timer = setInterval(() => {
-    secs--;
-    if (el) el.textContent = secs + 's';
-    if (secs <= 0) {
-        clearInterval(timer);
-        window.location.reload();
-    }
-}, 1000);
 </script>
 @endpush

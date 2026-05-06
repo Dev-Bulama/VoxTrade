@@ -38,6 +38,7 @@ Route::middleware(['auth', 'isActive', 'verified'])->group(function () {
         Route::get('/signals/{trade}', [SignalController::class, 'show'])->name('signals.show');
         Route::get('/performance', [DashboardController::class, 'performance'])->name('performance');
         Route::get('/how-it-works', [DashboardController::class, 'howItWorks'])->name('how-it-works');
+        Route::get('/signals/live', [SignalController::class, 'liveJson'])->name('signals.live');
         Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
         Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
         Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');

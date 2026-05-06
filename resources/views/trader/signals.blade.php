@@ -163,7 +163,7 @@
     };
 @endphp
 
-<a href="{{ route('signals.show', $signal) }}" class="block group">
+<a href="{{ route('signals.show', $signal) }}" class="block group" data-signal-id="{{ $signal->id }}">
 <div class="glass glass-hover rounded-2xl p-4 transition-all duration-200 h-full border {{ $cardBorder }} relative overflow-hidden">
 
     {{-- Glow accent --}}
